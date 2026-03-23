@@ -758,12 +758,21 @@ async def _test_llm_auth(config: dict[str, Any]) -> dict[str, Any]:
     """Initialize the configured client and perform a minimal text-generation check."""
     backend = str(config.get("llm_backend", "anthropic"))
     auth_mode = str(config.get("anthropic_auth_mode", "api_key"))
-    model = str(
-        config.get("eurekaclaw_fast_model")
-        or config.get("openai_compat_model")
-        or config.get("eurekaclaw_model")
-        or ""
-    )
+    openai_like_backends = {"openai_compat", "openrouter", "local", "minimax"}
+    if backend in openai_like_backends:
+        model = str(
+            config.get("openai_compat_model")
+            or config.get("eurekaclaw_fast_model")
+            or config.get("eurekaclaw_model")
+            or ""
+        )
+    else:
+        model = str(
+            config.get("eurekaclaw_fast_model")
+            or config.get("eurekaclaw_model")
+            or config.get("openai_compat_model")
+            or ""
+        )
 
     try:
         with _temporary_auth_env(config):
@@ -774,7 +783,11 @@ async def _test_llm_auth(config: dict[str, Any]) -> dict[str, Any]:
                 openai_api_key=str(config.get("openai_compat_api_key", "") or ""),
                 openai_model=str(config.get("openai_compat_model", "") or ""),
             )
-            response = await client.messages.create(
+            # Use the backend's normalized low-level call here instead of the
+            # shared retry wrapper. Some OpenAI-compatible providers can return
+            # a successful response with no text blocks for tiny probe prompts,
+            # which is still enough to verify auth/connectivity.
+            response = await client._create(
                 model=model,
                 max_tokens=16,
                 system="Reply with exactly OK.",
@@ -790,11 +803,18 @@ async def _test_llm_auth(config: dict[str, Any]) -> dict[str, Any]:
 
     text_parts = [block.text for block in response.content if getattr(block, "type", "") == "text"]
     reply = " ".join(text_parts).strip()
+    message = "Connection verified with a live model response."
+    if not response.content:
+        message = (
+            "Connection verified, but the provider returned no preview text for the probe request. "
+            f"stop_reason={response.stop_reason}, input_tokens={response.usage.input_tokens}, "
+            f"output_tokens={response.usage.output_tokens}"
+        )
     return {
         "ok": True,
         "provider": backend,
         "auth_mode": auth_mode,
-        "message": "Connection verified with a live model response.",
+        "message": message,
         "reply_preview": reply[:120],
         "model": model,
     }
