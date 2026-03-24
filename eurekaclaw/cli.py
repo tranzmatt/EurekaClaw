@@ -169,10 +169,19 @@ def resume(session_id: str, output: str) -> None:
     from eurekaclaw.skills.injector import SkillInjector
     from eurekaclaw.types.artifacts import ResearchBrief
 
-    global _console_html_path
-    out_dir_path = Path(output) / session_id
+    global _console_html_path, _should_save_html
+    
+    out_base = Path(output)
+    if out_base.name == session_id:
+        out_dir_path = out_base
+    elif Path.cwd().name == session_id and output == "./results":
+        out_dir_path = Path.cwd()
+    else:
+        out_dir_path = out_base / session_id
+        
     out_dir_path.mkdir(parents=True, exist_ok=True)
     _console_html_path = out_dir_path / "eurekaclaw_terminal.html"
+    _should_save_html = True
 
     cp = ProofCheckpoint(session_id)
     if not cp.exists():
