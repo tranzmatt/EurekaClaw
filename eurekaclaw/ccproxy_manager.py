@@ -175,17 +175,28 @@ def start_ccproxy(port: int) -> subprocess.Popen:
         FileNotFoundError: If ccproxy binary is not found.
     """
     exe = _ccproxy_exe() or "ccproxy"
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     proc = subprocess.Popen(
         [exe, "serve", "--port", str(port)],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=env,
     )
 
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if proc.poll() is not None:
+            stderr_out = ""
+            if proc.stderr:
+                try:
+                    stderr_out = proc.stderr.read().decode("utf-8", errors="replace").strip()
+                except Exception:
+                    pass
+            detail = f": {stderr_out}" if stderr_out else ""
             raise RuntimeError(
-                f"ccproxy exited immediately with code {proc.returncode}"
+                f"ccproxy exited immediately with code {proc.returncode}{detail}"
             )
         if is_ccproxy_running(port):
             return proc
@@ -263,7 +274,7 @@ def _patch_ccproxy_oauth_header() -> None:
         if not ccproxy_bin:
             return
 
-        shebang = pathlib.Path(ccproxy_bin).read_text().splitlines()[0]
+        shebang = pathlib.Path(ccproxy_bin).read_text(encoding="utf-8", errors="replace").splitlines()[0]
         python_exe = shebang.lstrip("#!").strip()
 
         result = subprocess.run(
@@ -279,7 +290,7 @@ def _patch_ccproxy_oauth_header() -> None:
         if not src_file.exists():
             return
 
-        text = src_file.read_text()
+        text = src_file.read_text(encoding="utf-8")
 
         correct = 'filtered_headers["anthropic-beta"] = "oauth-2025-04-20"'
         cli_marker = "cli_headers = self._collect_cli_headers()"
@@ -302,7 +313,7 @@ def _patch_ccproxy_oauth_header() -> None:
         if patched == text:
             return
 
-        src_file.write_text(patched)
+        src_file.write_text(patched, encoding="utf-8")
         for pyc in src_file.parent.glob("__pycache__/adapter*.pyc"):
             pyc.unlink(missing_ok=True)
         logger.info("Auto-patched ccproxy adapter: set anthropic-beta=oauth-2025-04-20")
