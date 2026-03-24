@@ -47,6 +47,8 @@ _CONFIG_FIELDS: dict[str, str] = {
     "openai_compat_model": "OPENAI_COMPAT_MODEL",
     "minimax_api_key": "MINIMAX_API_KEY",
     "minimax_model": "MINIMAX_MODEL",
+    "codex_auth_mode": "CODEX_AUTH_MODE",
+    "codex_model": "CODEX_MODEL",
     "eurekaclaw_mode": "EUREKACLAW_MODE",
     "gate_mode": "GATE_MODE",
     "experiment_mode": "EXPERIMENT_MODE",
@@ -788,13 +790,13 @@ def _preflight_check(config: dict[str, Any]) -> None:
     """
     from eurekaclaw.llm.factory import _BACKEND_ALIASES
 
-    backend = str(config.get("llm_backend", "anthropic"))
+    original_backend = str(config.get("llm_backend", "anthropic"))
     auth_mode = str(config.get("anthropic_auth_mode", "api_key"))
+    codex_auth_mode = str(config.get("codex_auth_mode", "api_key"))
 
-    # Resolve shortcut backends (openrouter, local) → (openai_compat, default_base_url)
-    _canonical, _default_base = _BACKEND_ALIASES.get(backend, (backend, ""))
-    if _canonical != backend:
-        backend = _canonical
+    # Resolve shortcut backends (openrouter, local, codex) → (openai_compat, default_base_url)
+    _canonical, _default_base = _BACKEND_ALIASES.get(original_backend, (original_backend, ""))
+    backend = _canonical if _canonical != original_backend else original_backend
 
     if backend == "openai_compat":
         base_url = str(config.get("openai_compat_base_url", "") or "") or _default_base
@@ -803,6 +805,10 @@ def _preflight_check(config: dict[str, Any]) -> None:
                 "OPENAI_COMPAT_BASE_URL is not set. "
                 "Configure it in the UI settings or .env before starting a session."
             )
+        # Skip API key check for codex OAuth — the key is injected at runtime
+        # by maybe_setup_codex_auth() before the LLM client is created.
+        if original_backend == "codex" and codex_auth_mode == "oauth":
+            return
         api_key = str(config.get("openai_compat_api_key", "") or "")
         if not api_key:
             raise ValueError(
@@ -888,17 +894,19 @@ def _merged_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
 @contextmanager
 def _temporary_auth_env(config: dict[str, Any]):
     """Temporarily align settings/env for auth checks, then restore them."""
-    env_keys = ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"]
+    env_keys = ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_COMPAT_API_KEY"]
     old_env = {key: os.environ.get(key) for key in env_keys}
     old_settings = {
         "anthropic_auth_mode": settings.anthropic_auth_mode,
         "ccproxy_port": settings.ccproxy_port,
+        "codex_auth_mode": settings.codex_auth_mode,
     }
     proc = None
 
     try:
         settings.anthropic_auth_mode = str(config.get("anthropic_auth_mode", settings.anthropic_auth_mode))
         settings.ccproxy_port = int(config.get("ccproxy_port", settings.ccproxy_port))
+        settings.codex_auth_mode = str(config.get("codex_auth_mode", settings.codex_auth_mode))
 
         api_key = str(config.get("anthropic_api_key", "") or "")
         if api_key:
@@ -907,11 +915,16 @@ def _temporary_auth_env(config: dict[str, Any]):
         if config.get("llm_backend") == "anthropic" and config.get("anthropic_auth_mode") == "oauth":
             proc = maybe_start_ccproxy()
 
+        if config.get("llm_backend") == "codex" and config.get("codex_auth_mode") == "oauth":
+            from eurekaclaw.codex_manager import maybe_setup_codex_auth
+            maybe_setup_codex_auth()
+
         yield
     finally:
         stop_ccproxy(proc)
         settings.anthropic_auth_mode = old_settings["anthropic_auth_mode"]
         settings.ccproxy_port = old_settings["ccproxy_port"]
+        settings.codex_auth_mode = old_settings["codex_auth_mode"]
         for key, value in old_env.items():
             if value is None:
                 os.environ.pop(key, None)
