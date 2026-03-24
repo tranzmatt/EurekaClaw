@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import os
+
 from eurekaclaw.llm.base import LLMClient
 
 # Named shortcuts for LLM_BACKEND values
 # "openrouter" → openai_compat with https://openrouter.ai/api/v1
 # "local"      → openai_compat with http://localhost:8000/v1 (vLLM default)
 # "minimax"    → openai_compat with https://api.minimaxi.chat/v1
+# "codex"      → openai_compat with https://api.openai.com/v1
+#                OPENAI_COMPAT_API_KEY is injected at runtime by codex_manager
+#                when CODEX_AUTH_MODE=oauth
 _BACKEND_ALIASES: dict[str, tuple[str, str]] = {
     "openrouter": ("openai_compat", "https://openrouter.ai/api/v1"),
     "local": ("openai_compat", "http://localhost:8000/v1"),
     "minimax": ("openai_compat", "https://api.minimaxi.chat/v1"),
+    "codex": ("openai_compat", "https://api.openai.com/v1"),
 }
 
 
@@ -48,21 +54,30 @@ def create_client(
     if resolved_backend == "openai_compat":
         from eurekaclaw.llm.openai_compat import OpenAICompatAdapter
 
+        # Prefer live env var — codex_manager sets OPENAI_COMPAT_API_KEY at runtime
+        # (after the settings singleton is loaded), so we must re-read it here.
         base_url = openai_base_url or settings.openai_compat_base_url or default_base_url
 
-        # Pick the right API key: Minimax has its own key field
+        # Pick the right API key per backend.
         if openai_api_key:
             api_key = openai_api_key
         elif original_backend == "minimax":
             api_key = settings.minimax_api_key
+        elif original_backend == "codex":
+            api_key = (
+                os.environ.get("OPENAI_COMPAT_API_KEY")
+                or settings.openai_compat_api_key
+            )
         else:
             api_key = settings.openai_compat_api_key
 
-        # Pick the right model: Minimax has its own model field
+        # Pick the right model per backend.
         if openai_model:
             model = openai_model
         elif original_backend == "minimax":
             model = settings.minimax_model
+        elif original_backend == "codex":
+            model = settings.codex_model
         else:
             model = settings.openai_compat_model
 
