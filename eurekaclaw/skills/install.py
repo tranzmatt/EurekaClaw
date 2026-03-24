@@ -69,10 +69,9 @@ def install_seed_skills(dest: pathlib.Path) -> None:
         
         repo_path = os.path.join(dest, SEED_SKILL_REPO_FOLDER)
         shutil.rmtree(repo_path)
-
-        # print("Successfully installed seed skills.")
+        return True
     except subprocess.CalledProcessError as e:
-        print(f"Error installing seed skills: {e.stderr}")
+        return False
 
 
 if __name__ == "__main__":

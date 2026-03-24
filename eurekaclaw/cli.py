@@ -528,7 +528,10 @@ def install_skills(force: bool, skillname: str = "") -> None:
             sys.exit(1)
         console.print(f"[green]Installed skill from clawhub: {skillname} to {dest}[/green]")
     else:
-        install_seed_skills(dest)
+        success = install_seed_skills(dest)
+        if not success:
+            console.print(f"[red]Failed to install seed skills to {dest}[/red]")
+            sys.exit(1)
         console.print(f"[green]Installed seed skills to {dest}[/green]")
     
 
