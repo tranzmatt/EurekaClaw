@@ -117,6 +117,12 @@ class TestTokenStore:
         with patch.object(token_store, "_creds_dir", return_value=tmp_path):
             token_store.save_tokens("openai-codex", {"access_token": "secret"})
             cred_file = tmp_path / "openai-codex.json"
+
+            # On Windows and some non-POSIX filesystems, POSIX mode bits are not
+            # reliably enforced or reported, so this assertion is only valid on
+            # POSIX-like platforms.
+            if os.name == "nt":
+                pytest.skip("POSIX file permission bits are not reliable on Windows")
             mode = cred_file.stat().st_mode & 0o777
             assert mode == 0o600
 
