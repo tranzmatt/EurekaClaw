@@ -26,7 +26,7 @@ class Config(BaseSettings):
         default="api_key", alias="ANTHROPIC_AUTH_MODE"
     )
     anthropic_base_url: str = Field(default="", alias="ANTHROPIC_BASE_URL")
-    ccproxy_port: int = Field(default=8000, alias="CCPROXY_PORT")
+    ccproxy_port: int = Field(default=8765, alias="CCPROXY_PORT")
 
     # Anthropic native
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
