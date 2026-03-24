@@ -878,17 +878,19 @@ def _merged_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
 @contextmanager
 def _temporary_auth_env(config: dict[str, Any]):
     """Temporarily align settings/env for auth checks, then restore them."""
-    env_keys = ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"]
+    env_keys = ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_COMPAT_API_KEY"]
     old_env = {key: os.environ.get(key) for key in env_keys}
     old_settings = {
         "anthropic_auth_mode": settings.anthropic_auth_mode,
         "ccproxy_port": settings.ccproxy_port,
+        "codex_auth_mode": settings.codex_auth_mode,
     }
     proc = None
 
     try:
         settings.anthropic_auth_mode = str(config.get("anthropic_auth_mode", settings.anthropic_auth_mode))
         settings.ccproxy_port = int(config.get("ccproxy_port", settings.ccproxy_port))
+        settings.codex_auth_mode = str(config.get("codex_auth_mode", settings.codex_auth_mode))
 
         api_key = str(config.get("anthropic_api_key", "") or "")
         if api_key:
@@ -897,11 +899,16 @@ def _temporary_auth_env(config: dict[str, Any]):
         if config.get("llm_backend") == "anthropic" and config.get("anthropic_auth_mode") == "oauth":
             proc = maybe_start_ccproxy()
 
+        if config.get("llm_backend") == "codex" and config.get("codex_auth_mode") == "oauth":
+            from eurekaclaw.codex_manager import maybe_setup_codex_auth
+            maybe_setup_codex_auth()
+
         yield
     finally:
         stop_ccproxy(proc)
         settings.anthropic_auth_mode = old_settings["anthropic_auth_mode"]
         settings.ccproxy_port = old_settings["ccproxy_port"]
+        settings.codex_auth_mode = old_settings["codex_auth_mode"]
         for key, value in old_env.items():
             if value is None:
                 os.environ.pop(key, None)
