@@ -26,7 +26,7 @@ class Config(BaseSettings):
         default="api_key", alias="ANTHROPIC_AUTH_MODE"
     )
     anthropic_base_url: str = Field(default="", alias="ANTHROPIC_BASE_URL")
-    ccproxy_port: int = Field(default=8000, alias="CCPROXY_PORT")
+    ccproxy_port: int = Field(default=8765, alias="CCPROXY_PORT")
 
     # Anthropic native
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
@@ -45,6 +45,14 @@ class Config(BaseSettings):
     # Minimax (LLM_BACKEND=minimax)
     minimax_api_key: str = Field(default="", alias="MINIMAX_API_KEY")
     minimax_model: str = Field(default="MiniMax-Text-01", alias="MINIMAX_MODEL")
+
+    # OpenAI / Codex (LLM_BACKEND=codex)
+    # "api_key" (default) — use OPENAI_COMPAT_API_KEY directly
+    # "oauth"             — use EurekaClaw's built-in OAuth (run: eurekaclaw login --provider openai-codex)
+    codex_auth_mode: Literal["api_key", "oauth"] = Field(
+        default="api_key", alias="CODEX_AUTH_MODE"
+    )
+    codex_model: str = Field(default="gpt-5.1-codex-mini", alias="CODEX_MODEL")
 
     # ---- External APIs -----------------------------------------------------
     brave_search_api_key: str = Field(default="", alias="BRAVE_SEARCH_API_KEY")
@@ -140,6 +148,8 @@ class Config(BaseSettings):
         backend = self.llm_backend
         if backend == "minimax":
             return self.minimax_model
+        if backend == "codex":
+            return self.codex_model
         if backend in ("openai_compat", "openrouter", "local"):
             return self.openai_compat_model or self.eurekaclaw_model
         return self.eurekaclaw_model
@@ -156,6 +166,8 @@ class Config(BaseSettings):
         if backend == "minimax":
             # Minimax exposes one model per endpoint; fast == main
             return self.minimax_model
+        if backend == "codex":
+            return self.codex_model
         if backend in ("openai_compat", "openrouter", "local"):
             return self.openai_compat_model or self.eurekaclaw_fast_model or self.eurekaclaw_model
         return self.fast_model

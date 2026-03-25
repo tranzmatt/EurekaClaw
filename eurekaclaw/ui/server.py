@@ -47,6 +47,8 @@ _CONFIG_FIELDS: dict[str, str] = {
     "openai_compat_model": "OPENAI_COMPAT_MODEL",
     "minimax_api_key": "MINIMAX_API_KEY",
     "minimax_model": "MINIMAX_MODEL",
+    "codex_auth_mode": "CODEX_AUTH_MODE",
+    "codex_model": "CODEX_MODEL",
     "eurekaclaw_mode": "EUREKACLAW_MODE",
     "gate_mode": "GATE_MODE",
     "experiment_mode": "EXPERIMENT_MODE",
@@ -432,7 +434,33 @@ class UIServerState:
                 asyncio.set_event_loop(loop2)
                 try:
                     async def _rerun() -> Any:
-                        return await session.run(run.input_spec)
+                        main_task = asyncio.current_task()
+                        assert main_task is not None
+                        cp3 = ProofCheckpoint(session_id)
+
+                        async def _poll3() -> None:
+                            while True:
+                                await asyncio.sleep(1)
+                                if cp3.is_pause_requested() and not main_task.cancelled():
+                                    main_task.cancel()
+                                    return
+
+                        poll3 = asyncio.create_task(_poll3())
+                        try:
+                            return await session.run(run.input_spec)
+                        except asyncio.CancelledError:
+                            pipeline = session.bus.get_pipeline() if session.bus else None
+                            stage = "unknown"
+                            if pipeline:
+                                from eurekaclaw.types.tasks import TaskStatus
+                                for t in pipeline.tasks:
+                                    if t.status == TaskStatus.IN_PROGRESS:
+                                        stage = t.name
+                                        break
+                            raise ProofPausedException(session_id, stage)
+                        finally:
+                            poll3.cancel()
+
                     result2 = loop2.run_until_complete(_rerun())
                 finally:
                     loop2.close()
@@ -468,16 +496,82 @@ class UIServerState:
             asyncio.set_event_loop(loop)
             try:
                 with _temporary_auth_env(config):
-                    final_state = loop.run_until_complete(
-                        inner_loop.run(session_id, domain=domain)
-                    )
+                    async def _resume_with_poller() -> Any:
+                        main_task = asyncio.current_task()
+                        assert main_task is not None
+                        cp2 = ProofCheckpoint(session_id)
+
+                        async def _poll() -> None:
+                            while True:
+                                await asyncio.sleep(1)
+                                if cp2.is_pause_requested() and not main_task.cancelled():
+                                    main_task.cancel()
+                                    return
+
+                        poll = asyncio.create_task(_poll())
+                        try:
+                            return await inner_loop.run(session_id, domain=domain)
+                        except asyncio.CancelledError:
+                            from eurekaclaw.agents.theory.checkpoint import ProofPausedException
+                            raise ProofPausedException(session_id, "theory")
+                        finally:
+                            poll.cancel()
+
+                    final_state = loop.run_until_complete(_resume_with_poller())
                     session.bus.put_theory_state(final_state)
             finally:
                 loop.close()
                 asyncio.set_event_loop(None)
 
+            # Theory completed — run the writer stage to produce the paper.
+            pipeline = session.bus.get_pipeline()
+            if pipeline:
+                from eurekaclaw.types.tasks import TaskStatus as _TS
+                writer_task = next(
+                    (t for t in pipeline.tasks if t.name == "writer" and t.status != _TS.COMPLETED),
+                    None,
+                )
+                if writer_task:
+                    orch = session.orchestrator
+                    config = _config_payload()
+                    wloop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(wloop)
+                    try:
+                        with _temporary_auth_env(config):
+                            async def _run_writer() -> None:
+                                writer_task.mark_started()
+                                agent = orch.router.resolve(writer_task)
+                                result = await agent.execute(writer_task)
+                                if not result.failed:
+                                    task_outputs = dict(result.output)
+                                    if result.text_summary:
+                                        task_outputs["text_summary"] = result.text_summary
+                                    writer_task.mark_completed(task_outputs)
+                                else:
+                                    writer_task.mark_failed(result.error)
+                            wloop.run_until_complete(_run_writer())
+                    finally:
+                        wloop.close()
+                        asyncio.set_event_loop(None)
+
+            # Collect outputs and save artifacts so PDF compilation works.
+            brief = session.bus.get_research_brief()
+            if brief:
+                orch = session.orchestrator
+                result = orch._collect_outputs(brief)
+                run.result = result
+                out_dir = save_artifacts(result, _ROOT_DIR / "results" / run.run_id)
+                run.output_dir = str(out_dir)
+                run.output_summary = {
+                    "latex_paper_length": len(result.latex_paper),
+                    "has_theory_state": bool(result.theory_state_json),
+                    "output_dir": str(out_dir),
+                    "resumed": True,
+                }
+            else:
+                run.output_summary = {"resumed": True, "session_id": session_id}
+
             run.status = "completed"
-            run.output_summary = {"resumed": True, "session_id": session_id}
 
         except Exception as exc:
             from eurekaclaw.agents.theory.checkpoint import ProofPausedException  # noqa: F811
@@ -696,13 +790,13 @@ def _preflight_check(config: dict[str, Any]) -> None:
     """
     from eurekaclaw.llm.factory import _BACKEND_ALIASES
 
-    backend = str(config.get("llm_backend", "anthropic"))
+    original_backend = str(config.get("llm_backend", "anthropic"))
     auth_mode = str(config.get("anthropic_auth_mode", "api_key"))
+    codex_auth_mode = str(config.get("codex_auth_mode", "api_key"))
 
-    # Resolve shortcut backends (openrouter, local) → (openai_compat, default_base_url)
-    _canonical, _default_base = _BACKEND_ALIASES.get(backend, (backend, ""))
-    if _canonical != backend:
-        backend = _canonical
+    # Resolve shortcut backends (openrouter, local, codex) → (openai_compat, default_base_url)
+    _canonical, _default_base = _BACKEND_ALIASES.get(original_backend, (original_backend, ""))
+    backend = _canonical if _canonical != original_backend else original_backend
 
     if backend == "openai_compat":
         base_url = str(config.get("openai_compat_base_url", "") or "") or _default_base
@@ -711,6 +805,10 @@ def _preflight_check(config: dict[str, Any]) -> None:
                 "OPENAI_COMPAT_BASE_URL is not set. "
                 "Configure it in the UI settings or .env before starting a session."
             )
+        # Skip API key check for codex OAuth — the key is injected at runtime
+        # by maybe_setup_codex_auth() before the LLM client is created.
+        if original_backend == "codex" and codex_auth_mode == "oauth":
+            return
         api_key = str(config.get("openai_compat_api_key", "") or "")
         if not api_key:
             raise ValueError(
@@ -796,17 +894,19 @@ def _merged_config(overrides: dict[str, Any] | None = None) -> dict[str, Any]:
 @contextmanager
 def _temporary_auth_env(config: dict[str, Any]):
     """Temporarily align settings/env for auth checks, then restore them."""
-    env_keys = ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL"]
+    env_keys = ["ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL", "OPENAI_COMPAT_API_KEY"]
     old_env = {key: os.environ.get(key) for key in env_keys}
     old_settings = {
         "anthropic_auth_mode": settings.anthropic_auth_mode,
         "ccproxy_port": settings.ccproxy_port,
+        "codex_auth_mode": settings.codex_auth_mode,
     }
     proc = None
 
     try:
         settings.anthropic_auth_mode = str(config.get("anthropic_auth_mode", settings.anthropic_auth_mode))
         settings.ccproxy_port = int(config.get("ccproxy_port", settings.ccproxy_port))
+        settings.codex_auth_mode = str(config.get("codex_auth_mode", settings.codex_auth_mode))
 
         api_key = str(config.get("anthropic_api_key", "") or "")
         if api_key:
@@ -815,11 +915,16 @@ def _temporary_auth_env(config: dict[str, Any]):
         if config.get("llm_backend") == "anthropic" and config.get("anthropic_auth_mode") == "oauth":
             proc = maybe_start_ccproxy()
 
+        if config.get("llm_backend") == "codex" and config.get("codex_auth_mode") == "oauth":
+            from eurekaclaw.codex_manager import maybe_setup_codex_auth
+            maybe_setup_codex_auth()
+
         yield
     finally:
         stop_ccproxy(proc)
         settings.anthropic_auth_mode = old_settings["anthropic_auth_mode"]
         settings.ccproxy_port = old_settings["ccproxy_port"]
+        settings.codex_auth_mode = old_settings["codex_auth_mode"]
         for key, value in old_env.items():
             if value is None:
                 os.environ.pop(key, None)
@@ -831,22 +936,36 @@ async def _test_llm_auth(config: dict[str, Any]) -> dict[str, Any]:
     """Initialize the configured client and perform a minimal text-generation check."""
     backend = str(config.get("llm_backend", "anthropic"))
     auth_mode = str(config.get("anthropic_auth_mode", "api_key"))
-    model = str(
-        config.get("eurekaclaw_fast_model")
-        or config.get("openai_compat_model")
-        or config.get("eurekaclaw_model")
-        or ""
-    )
+    codex_auth = str(config.get("codex_auth_mode", "api_key"))
+
+    # Resolve model: codex uses codex_model, others use fast/compat/main
+    if backend == "codex":
+        model = str(config.get("codex_model") or "o4-mini")
+    else:
+        model = str(
+            config.get("eurekaclaw_fast_model")
+            or config.get("openai_compat_model")
+            or config.get("eurekaclaw_model")
+            or ""
+        )
 
     try:
         with _temporary_auth_env(config):
-            client = create_client(
-                backend=backend,
-                anthropic_api_key=str(config.get("anthropic_api_key", "") or ""),
-                openai_base_url=str(config.get("openai_compat_base_url", "") or ""),
-                openai_api_key=str(config.get("openai_compat_api_key", "") or ""),
-                openai_model=str(config.get("openai_compat_model", "") or ""),
-            )
+            # For codex OAuth, don't pass openai_api_key — it's injected into
+            # env by maybe_setup_codex_auth() inside _temporary_auth_env.
+            if backend == "codex" and codex_auth == "oauth":
+                client = create_client(
+                    backend=backend,
+                    openai_model=str(config.get("codex_model") or ""),
+                )
+            else:
+                client = create_client(
+                    backend=backend,
+                    anthropic_api_key=str(config.get("anthropic_api_key", "") or ""),
+                    openai_base_url=str(config.get("openai_compat_base_url", "") or ""),
+                    openai_api_key=str(config.get("openai_compat_api_key", "") or ""),
+                    openai_model=str(config.get("openai_compat_model", "") or ""),
+                )
             response = await client.messages.create(
                 model=model,
                 max_tokens=16,
@@ -933,6 +1052,51 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 return
             authed, msg = check_ccproxy_auth("claude_api")
             self._send_json({"installed": True, "authenticated": authed, "message": msg})
+            return
+        if parsed.path == "/api/codex/status":
+            try:
+                from eurekaclaw.codex_manager import _read_codex_cli_tokens, _CODEX_CLI_AUTH_PATH
+                from eurekaclaw.auth.token_store import load_tokens
+
+                # Check EurekaClaw store first, then Codex CLI file
+                stored = load_tokens("openai-codex")
+                cli_tokens = _read_codex_cli_tokens()
+                has_token = bool(
+                    (stored and stored.get("access_token"))
+                    or (cli_tokens and cli_tokens.get("access_token"))
+                )
+                if has_token:
+                    self._send_json({
+                        "installed": True,
+                        "authenticated": True,
+                        "message": "Codex credentials available",
+                    })
+                elif _CODEX_CLI_AUTH_PATH.exists():
+                    self._send_json({
+                        "installed": True,
+                        "authenticated": False,
+                        "message": "Codex CLI file found but access token is missing or invalid",
+                    })
+                else:
+                    self._send_json({
+                        "installed": False,
+                        "authenticated": False,
+                        "message": f"No credentials found. Run: npm install -g @openai/codex && codex auth login",
+                    })
+            except Exception as exc:
+                self._send_json({
+                    "installed": False,
+                    "authenticated": False,
+                    "message": f"Error checking Codex status: {exc}",
+                })
+            return
+        if parsed.path == "/api/codex/package-status":
+            try:
+                import importlib.util
+                openai_spec = importlib.util.find_spec("openai")
+                self._send_json({"installed": openai_spec is not None})
+            except Exception:
+                self._send_json({"installed": False})
             return
         if parsed.path == "/api/health":
             self._send_json({"ok": True, "time": datetime.utcnow().isoformat()})
@@ -1108,6 +1272,63 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                     stderr=_subprocess.DEVNULL,
                 )
                 self._send_json({"ok": True, "message": "OAuth login opened in your browser. Complete authorization, then click 'Save & test'."})
+            except Exception as exc:
+                self._send_json({"ok": False, "message": str(exc)})
+            return
+
+        if parsed.path == "/api/codex/install":
+            try:
+                repo_root = str(Path(__file__).resolve().parents[2])
+                # Prefer uv pip (uv-managed venvs don't bundle pip)
+                uv_exe = shutil.which("uv")
+                if uv_exe:
+                    cmd = [uv_exe, "pip", "install", "openai"]
+                else:
+                    cmd = [_sys.executable, "-m", "pip", "install", "openai"]
+                result = _subprocess.run(
+                    cmd,
+                    capture_output=True, text=True, timeout=120,
+                    cwd=repo_root,
+                )
+                if result.returncode == 0:
+                    self._send_json({"ok": True, "message": "OpenAI package installed successfully."})
+                else:
+                    self._send_json({"ok": False, "message": result.stderr.strip() or result.stdout.strip()})
+            except Exception as exc:
+                self._send_json({"ok": False, "message": str(exc)})
+            return
+
+        if parsed.path == "/api/codex/login":
+            try:
+                from eurekaclaw.codex_manager import _read_codex_cli_tokens, _CODEX_CLI_AUTH_PATH
+                from eurekaclaw.auth.token_store import save_tokens
+
+                if not _CODEX_CLI_AUTH_PATH.exists():
+                    self._send_json({
+                        "ok": False,
+                        "message": (
+                            f"Codex CLI credentials not found at {_CODEX_CLI_AUTH_PATH}. "
+                            "Install and login first:\n"
+                            "  npm install -g @openai/codex\n"
+                            "  codex auth login"
+                        ),
+                    })
+                    return
+                tokens = _read_codex_cli_tokens()
+                if not tokens or not tokens.get("access_token"):
+                    self._send_json({
+                        "ok": False,
+                        "message": (
+                            f"Could not read a valid access_token from {_CODEX_CLI_AUTH_PATH}. "
+                            "Try re-authenticating with: codex auth login"
+                        ),
+                    })
+                    return
+                save_tokens("openai-codex", tokens)
+                self._send_json({
+                    "ok": True,
+                    "message": f"Codex credentials imported from {_CODEX_CLI_AUTH_PATH}",
+                })
             except Exception as exc:
                 self._send_json({"ok": False, "message": str(exc)})
             return

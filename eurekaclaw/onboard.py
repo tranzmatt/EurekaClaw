@@ -188,6 +188,7 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
     console.print(
         "  [dim]anthropic[/dim]     — Anthropic API key (recommended)\n"
         "  [dim]oauth[/dim]         — Claude Pro/Max via OAuth (no API key needed)\n"
+        "  [dim]codex[/dim]         — OpenAI Codex subscription (OAuth) or API key\n"
         "  [dim]openrouter[/dim]    — OpenRouter (access many models)\n"
         "  [dim]openai_compat[/dim] — Any OpenAI-compatible endpoint\n"
         "  [dim]local[/dim]         — Local vLLM / LM Studio at localhost:8000\n"
@@ -195,7 +196,7 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
     )
     backend = ask_choice(
         "LLM_BACKEND",
-        ["anthropic", "oauth", "openrouter", "openai_compat", "local", "minimax"],
+        ["anthropic", "oauth", "codex", "openrouter", "openai_compat", "local", "minimax"],
         get("LLM_BACKEND", "anthropic"),
     )
     cfg["LLM_BACKEND"] = backend
@@ -211,7 +212,7 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
             secret=True,
         )
         cfg["ANTHROPIC_AUTH_MODE"] = "api_key"
-        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8000")
+        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8765")
         cfg["ANTHROPIC_BASE_URL"] = ask(
             "  ANTHROPIC_BASE_URL (leave blank for default)",
             get("ANTHROPIC_BASE_URL", ""),
@@ -224,11 +225,9 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
         )
         cfg["ANTHROPIC_AUTH_MODE"] = "oauth"
         cfg["ANTHROPIC_API_KEY"] = get("ANTHROPIC_API_KEY", "")
-        cfg["CCPROXY_PORT"] = ask("  CCPROXY_PORT", get("CCPROXY_PORT", "8000"))
-        cfg["ANTHROPIC_BASE_URL"] = ask(
-            "  ANTHROPIC_BASE_URL (leave blank for default)",
-            get("ANTHROPIC_BASE_URL", ""),
-        )
+        ccproxy_port = ask("  CCPROXY_PORT", get("CCPROXY_PORT", "8765"))
+        cfg["CCPROXY_PORT"] = ccproxy_port
+        cfg["ANTHROPIC_BASE_URL"] = f"http://localhost:{ccproxy_port}"
 
     elif backend == "openrouter":
         cfg["OPENAI_COMPAT_API_KEY"] = ask(
@@ -242,7 +241,7 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
         )
         cfg["OPENAI_COMPAT_BASE_URL"] = "https://openrouter.ai/api/v1"
         cfg["ANTHROPIC_AUTH_MODE"] = get("ANTHROPIC_AUTH_MODE", "api_key")
-        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8000")
+        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8765")
         cfg["ANTHROPIC_BASE_URL"] = get("ANTHROPIC_BASE_URL", "")
 
     elif backend == "openai_compat":
@@ -260,7 +259,7 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
             get("OPENAI_COMPAT_MODEL", ""),
         )
         cfg["ANTHROPIC_AUTH_MODE"] = get("ANTHROPIC_AUTH_MODE", "api_key")
-        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8000")
+        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8765")
         cfg["ANTHROPIC_BASE_URL"] = get("ANTHROPIC_BASE_URL", "")
 
     elif backend == "local":
@@ -270,7 +269,7 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
         )
         cfg["OPENAI_COMPAT_BASE_URL"] = get("OPENAI_COMPAT_BASE_URL", "http://localhost:8000/v1")
         cfg["ANTHROPIC_AUTH_MODE"] = get("ANTHROPIC_AUTH_MODE", "api_key")
-        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8000")
+        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8765")
         cfg["ANTHROPIC_BASE_URL"] = get("ANTHROPIC_BASE_URL", "")
 
     elif backend == "minimax":
@@ -281,7 +280,35 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
             "  MINIMAX_MODEL", get("MINIMAX_MODEL", "MiniMax-Text-01")
         )
         cfg["ANTHROPIC_AUTH_MODE"] = get("ANTHROPIC_AUTH_MODE", "api_key")
-        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8000")
+        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8765")
+        cfg["ANTHROPIC_BASE_URL"] = get("ANTHROPIC_BASE_URL", "")
+
+    elif backend == "codex":
+        codex_auth = ask_choice(
+            "CODEX_AUTH_MODE  (oauth=Codex subscription; api_key=direct API key)",
+            ["oauth", "api_key"],
+            get("CODEX_AUTH_MODE", "oauth"),
+        )
+        cfg["CODEX_AUTH_MODE"] = codex_auth
+        if codex_auth == "oauth":
+            console.print(
+                "  [dim]OAuth prerequisite: install the Codex CLI and log in once:\n"
+                "    npm install -g @openai/codex\n"
+                "    codex auth login\n"
+                "    eurekaclaw login --provider openai-codex[/dim]"
+            )
+        else:
+            cfg["OPENAI_COMPAT_API_KEY"] = ask(
+                "  OPENAI_COMPAT_API_KEY (sk-...)",
+                get("OPENAI_COMPAT_API_KEY", ""),
+                secret=True,
+            )
+        cfg["CODEX_MODEL"] = ask(
+            "  CODEX_MODEL",
+            get("CODEX_MODEL", "o4-mini"),
+        )
+        cfg["ANTHROPIC_AUTH_MODE"] = get("ANTHROPIC_AUTH_MODE", "api_key")
+        cfg["CCPROXY_PORT"] = get("CCPROXY_PORT", "8765")
         cfg["ANTHROPIC_BASE_URL"] = get("ANTHROPIC_BASE_URL", "")
 
     # Model selection (for Anthropic-family backends)

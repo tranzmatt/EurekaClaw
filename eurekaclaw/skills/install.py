@@ -12,6 +12,13 @@ SEED_SKILL_REPO = "https://github.com/EurekaClaw/seed_skills.git"
 SEED_SKILL_REPO_FOLDER = "seed_skills"
 SEED_SKILL_FOLDER = pathlib.Path(SEED_SKILL_REPO_FOLDER) / "seedskills"
 
+import stat
+
+def _remove_readonly(func, path, _):
+    """Clear read-only flag and retry."""
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
 def install_from_hub(skillname: str, dest: pathlib.Path) -> None:
     """
     Check if a skill exists on ClawHub, and install it if found.
@@ -64,7 +71,12 @@ def install_seed_skills(dest: pathlib.Path) -> None:
                 copy_directory(src, dest, overwrite=True)
         
         repo_path = os.path.join(dest, SEED_SKILL_REPO_FOLDER)
-        shutil.rmtree(repo_path)
+
+        try:
+            shutil.rmtree(repo_path, onexc=_remove_readonly)
+        except TypeError:
+            shutil.rmtree(repo_path, onerror=_remove_readonly)
+
 
         # print("Successfully installed seed skills.")
     except subprocess.CalledProcessError as e:

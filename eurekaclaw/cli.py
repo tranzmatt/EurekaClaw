@@ -309,6 +309,13 @@ def replay_theory_tail(session_id: str, from_stage: str) -> None:
         except (RuntimeError, ValueError) as exc:
             console.print(f"[red]ccproxy error: {exc}[/red]")
             sys.exit(1)
+    if settings.llm_backend == "codex" and settings.codex_auth_mode == "oauth":
+        try:
+            from eurekaclaw.codex_manager import maybe_setup_codex_auth
+            maybe_setup_codex_auth()
+        except (RuntimeError, ValueError) as exc:
+            console.print(f"[red]Codex auth error: {exc}[/red]")
+            sys.exit(1)
 
     session_dir = settings.runs_dir / session_id
     if not session_dir.exists():
@@ -404,6 +411,13 @@ def test_paper_reader(session_id: str, paper_ref: str, mode: str, direction: str
         except (RuntimeError, ValueError) as exc:
             console.print(f"[red]ccproxy error: {exc}[/red]")
             sys.exit(1)
+    if settings.llm_backend == "codex" and settings.codex_auth_mode == "oauth":
+        try:
+            from eurekaclaw.codex_manager import maybe_setup_codex_auth
+            maybe_setup_codex_auth()
+        except (RuntimeError, ValueError) as exc:
+            console.print(f"[red]Codex auth error: {exc}[/red]")
+            sys.exit(1)
 
     session_dir = settings.runs_dir / session_id
     if not session_dir.exists():
@@ -493,6 +507,68 @@ def test_paper_reader(session_id: str, paper_ref: str, mode: str, direction: str
             f"\n[green]Summary:[/green] abstract={len(abstract_results)} result(s), "
             f"pdf={len(pdf_results)} result(s)"
         )
+
+
+@main.command()
+@click.option(
+    "--provider", "-p",
+    required=True,
+    help="OAuth provider to read credentials from. Currently supported: openai-codex",
+)
+def login(provider: str) -> None:
+    """Import credentials from an external provider's CLI into EurekaClaw.
+
+    For openai-codex, reads the token that the official Codex CLI stored after
+    you ran ``codex auth login``, and copies it into EurekaClaw's credential
+    store so it is used automatically on future runs.
+
+    Prerequisites:
+
+        npm install -g @openai/codex
+        codex auth login        # opens browser, one-time
+
+    Then:
+
+        eurekaclaw login --provider openai-codex
+    """
+    from eurekaclaw.auth.providers import get_provider
+    from eurekaclaw.auth.token_store import save_tokens
+
+    try:
+        prov = get_provider(provider)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        sys.exit(1)
+
+    if provider == "openai-codex":
+        from eurekaclaw.codex_manager import _CODEX_CLI_AUTH_PATH, _read_codex_cli_tokens
+
+        if not _CODEX_CLI_AUTH_PATH.exists():
+            console.print(
+                f"[red]Codex CLI credentials not found at {_CODEX_CLI_AUTH_PATH}[/red]\n"
+                "[dim]Log in first with the Codex CLI:\n"
+                "  npm install -g @openai/codex\n"
+                "  codex auth login[/dim]"
+            )
+            sys.exit(1)
+
+        tokens = _read_codex_cli_tokens()
+        if not tokens or not tokens.get("access_token"):
+            console.print(
+                f"[red]Could not read a valid access_token from {_CODEX_CLI_AUTH_PATH}[/red]\n"
+                "[dim]Try re-authenticating with: codex auth login[/dim]"
+            )
+            sys.exit(1)
+
+        save_tokens(provider, tokens)
+        console.print(f"[green]✓ Codex credentials imported from {_CODEX_CLI_AUTH_PATH}[/green]")
+        console.print(
+            "[dim]Set [bold]LLM_BACKEND=codex[/bold] and "
+            "[bold]CODEX_AUTH_MODE=oauth[/bold] in your .env to use them.[/dim]"
+        )
+    else:
+        console.print(f"[red]No login handler for provider {provider!r}.[/red]")
+        sys.exit(1)
 
 
 @main.command()
@@ -779,6 +855,15 @@ def _run_session(
                 atexit.register(stop_ccproxy, _ccproxy_proc)
         except (RuntimeError, ValueError) as exc:
             console.print(f"[red]ccproxy error: {exc}[/red]")
+            sys.exit(1)
+
+    # --- codex: inject OAuth token if LLM_BACKEND=codex + CODEX_AUTH_MODE=oauth
+    if settings.llm_backend == "codex" and settings.codex_auth_mode == "oauth":
+        try:
+            from eurekaclaw.codex_manager import maybe_setup_codex_auth
+            maybe_setup_codex_auth()
+        except (RuntimeError, ValueError) as exc:
+            console.print(f"[red]Codex auth error: {exc}[/red]")
             sys.exit(1)
 
     spec = InputSpec(
