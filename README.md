@@ -69,7 +69,7 @@ $ eurekaclaw prove "Find recent papers on sparse attention + prove efficiency bo
 curl -fsSL https://eurekaclaw.ai/install.sh | bash
 ```
 
-**Windows** *(under development — not fully supported yet)*
+**Windows**
 
 ```powershell
 powershell -c "irm https://eurekaclaw.ai/install_win.ps1 | iex"

@@ -61,7 +61,7 @@ $ eurekaclaw prove "Find recent papers on sparse attention + prove efficiency bo
 
 ## 安装
 
-(详细教程参见 [安装](https://eurekaclaw.github.io/getting-started/installation.html))
+(详细教程参见 [安装](https://eurekaclaw.github.io/zh/getting-started/installation.html))
 
 **macOS / Linux**
 
@@ -69,7 +69,7 @@ $ eurekaclaw prove "Find recent papers on sparse attention + prove efficiency bo
 curl -fsSL https://eurekaclaw.ai/install.sh | bash
 ```
 
-**Windows** *（开发中 — 尚未完全支持）*
+**Windows** 
 
 ```powershell
 powershell -c "irm https://eurekaclaw.ai/install_win.ps1 | iex"
