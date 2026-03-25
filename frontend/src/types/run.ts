@@ -225,6 +225,7 @@ export type RunStatus =
 export interface SessionRun {
   run_id: string;
   session_id?: string;
+  launch_html_url?: string;
   name?: string;
   status: RunStatus;
   created_at?: string;

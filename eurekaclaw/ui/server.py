@@ -24,8 +24,9 @@ import sys as _sys
 
 from eurekaclaw.ccproxy_manager import maybe_start_ccproxy, stop_ccproxy, is_ccproxy_available, check_ccproxy_auth, _oauth_install_hint
 from eurekaclaw.config import settings
+from eurekaclaw.console import close_ui_html_sink, register_ui_html_sink
 from eurekaclaw.llm import create_client
-from eurekaclaw.main import EurekaSession, save_artifacts, _compile_pdf
+from eurekaclaw.main import EurekaSession, save_artifacts, save_console_html_artifact, _compile_pdf
 from eurekaclaw.skills.registry import SkillRegistry
 from eurekaclaw.types.tasks import InputSpec, ResearchOutput, TaskStatus
 
@@ -35,6 +36,7 @@ _ROOT_DIR = Path(__file__).resolve().parents[2]
 _FRONTEND_DIR = Path(__file__).resolve().parent / "static"
 _DEV_FRONTEND_DIR = _ROOT_DIR / "frontend"
 _ENV_PATH = _ROOT_DIR / ".env"
+_UI_LAUNCH_DIR = _ROOT_DIR / "launch_from_ui"
 
 _CONFIG_FIELDS: dict[str, str] = {
     "llm_backend": "LLM_BACKEND",
@@ -275,6 +277,9 @@ class UIServerState:
 
     def create_run(self, input_spec: InputSpec) -> SessionRun:
         run = SessionRun(run_id=str(uuid.uuid4()), input_spec=input_spec)
+        out_dir = _ROOT_DIR / "results" / run.run_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        run.output_dir = str(out_dir)
         with self._lock:
             self.runs[run.run_id] = run
         self._persist_run(run)
@@ -345,7 +350,9 @@ class UIServerState:
         run.eureka_session = None
         run.eureka_session_id = ""
         run.output_summary = {}
-        run.output_dir = ""
+        out_dir = _ROOT_DIR / "results" / run.run_id
+        out_dir.mkdir(parents=True, exist_ok=True)
+        run.output_dir = str(out_dir)
         self._persist_run(run)
         self.start_run(run)
         return self.snapshot_run(run)
@@ -416,6 +423,8 @@ class UIServerState:
         run.paused_stage = ""
         run.updated_at = datetime.utcnow()
         self._persist_run(run)
+        launch_html_path = _UI_LAUNCH_DIR / f"{run.run_id}.html"
+        register_ui_html_sink(launch_html_path)
 
         try:
             session = run.eureka_session
@@ -561,6 +570,7 @@ class UIServerState:
                 result = orch._collect_outputs(brief)
                 run.result = result
                 out_dir = save_artifacts(result, _ROOT_DIR / "results" / run.run_id)
+                save_console_html_artifact(out_dir)
                 run.output_dir = str(out_dir)
                 run.output_summary = {
                     "latex_paper_length": len(result.latex_paper),
@@ -587,6 +597,7 @@ class UIServerState:
                 run.status = "failed"
                 run.error = str(exc)
         finally:
+            close_ui_html_sink()
             run.completed_at = datetime.utcnow()
             run.updated_at = datetime.utcnow()
             self._persist_run(run)
@@ -599,6 +610,8 @@ class UIServerState:
         run.status = "running"
         run.started_at = datetime.utcnow()
         run.updated_at = datetime.utcnow()
+        launch_html_path = _UI_LAUNCH_DIR / f"{run.run_id}.html"
+        register_ui_html_sink(launch_html_path)
 
         try:
             # Pre-flight: verify credentials before spending time initialising agents
@@ -661,6 +674,7 @@ class UIServerState:
 
             # Save artifacts to results/<run_id>/ so files are always on disk.
             out_dir = save_artifacts(result, _ROOT_DIR / "results" / run.run_id)
+            save_console_html_artifact(out_dir)
             run.output_dir = str(out_dir)
 
             run.status = "completed"
@@ -684,6 +698,7 @@ class UIServerState:
                 run.status = "failed"
                 run.error = str(exc)
         finally:
+            close_ui_html_sink()
             if run.eureka_session_id:
                 from eurekaclaw.ui import review_gate as _rg
                 _rg.unregister_all(run.eureka_session_id)
@@ -721,6 +736,7 @@ class UIServerState:
             "run_id": run.run_id,
             "name": run.name,
             "session_id": run.eureka_session_id,
+            "launch_html_url": f"/api/runs/{run.run_id}/launch-html",
             "status": run.status,
             "error": run.error,
             "created_at": run.created_at.isoformat(),
@@ -1013,6 +1029,20 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/runs":
             runs = [self.state.snapshot_run(run) for run in self.state.list_runs()]
             self._send_json({"runs": runs})
+            return
+        _launch_parts = parsed.path.strip("/").split("/")
+        if (len(_launch_parts) == 4 and _launch_parts[0] == "api" and _launch_parts[1] == "runs"
+                and _launch_parts[3] == "launch-html"):
+            _launch_run_id = _launch_parts[2]
+            _launch_run = self.state.get_run(_launch_run_id)
+            if _launch_run is None:
+                self._send_json({"error": "Run not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            _launch_path = _UI_LAUNCH_DIR / f"{_launch_run.run_id}.html"
+            if not _launch_path.is_file():
+                self._send_json({"error": "File not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            self._send_file(_launch_path, as_attachment=False)
             return
         # Serve artifact files: /api/runs/<run_id>/artifacts/<filename>
         _art_parts = parsed.path.strip("/").split("/")
@@ -1427,8 +1457,8 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _send_file(self, file_path: Path) -> None:
-        """Serve a file for download with appropriate Content-Type."""
+    def _send_file(self, file_path: Path, *, as_attachment: bool = True) -> None:
+        """Serve a file with appropriate Content-Type."""
         import mimetypes
         content_type, _ = mimetypes.guess_type(str(file_path))
         if content_type is None:
@@ -1437,7 +1467,8 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Content-Disposition", f'attachment; filename="{file_path.name}"')
+        disposition = "attachment" if as_attachment else "inline"
+        self.send_header("Content-Disposition", f'{disposition}; filename="{file_path.name}"')
         self.end_headers()
         self.wfile.write(data)
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import uuid
 from pathlib import Path
 
 from eurekaclaw.config import settings
+from eurekaclaw.console import console
 from eurekaclaw.domains import resolve_domain
 from eurekaclaw.knowledge_bus.bus import KnowledgeBus
 from eurekaclaw.orchestrator.meta_orchestrator import MetaOrchestrator
@@ -146,6 +148,23 @@ def save_artifacts(result: ResearchOutput, out_dir: str | Path) -> Path:
         (out / "research_brief.json").write_text(result.research_brief_json, encoding="utf-8")
 
     return out
+
+
+def save_console_html_artifact(out_dir: str | Path, stem: str = "eurekaclaw_terminal") -> Path | None:
+    """Persist the current Rich console transcript as an HTML artifact.
+
+    Returns the written file path on success, otherwise ``None``.
+    """
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    export_path = out / f"{stem}_{timestamp}.html"
+    try:
+        console.save_html(str(export_path))
+    except Exception:
+        logger.exception("Failed to save terminal HTML artifact to %s", export_path)
+        return None
+    return export_path
 
 
 def _copy_template_assets(out_dir: Path) -> None:

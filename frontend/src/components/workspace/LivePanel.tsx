@@ -154,6 +154,14 @@ export function LivePanel({ run }: LivePanelProps) {
   const pipeline = run.pipeline ?? [];
   const arts = run.artifacts ?? {};
   const activeOuter = getActiveOuterStage(pipeline);
+  const launchHtmlUrl = run.launch_html_url;
+  const launchHtmlLink = launchHtmlUrl ? (
+    <p className="live-html-link-row">
+      <a className="live-html-link" href={launchHtmlUrl} target="_blank" rel="noreferrer">
+        Open run HTML log
+      </a>
+    </p>
+  ) : null;
 
   // Survey gate
   const surveyTask = pipeline.find((t) => t.name === 'survey');
@@ -221,6 +229,7 @@ export function LivePanel({ run }: LivePanelProps) {
           </div>
           <p className="live-stage-label">{stageName} {innerLabel}</p>
           <p className="drawer-muted live-stage-sub">{escapeHtml(narrative)}</p>
+          {launchHtmlLink}
         </div>
       </div>
     );
@@ -232,6 +241,7 @@ export function LivePanel({ run }: LivePanelProps) {
         <div className="live-thinking-view">
           <p className="live-stage-label" style={{ color: 'var(--amber)' }}>⏸ Session paused</p>
           <p className="drawer-muted">Use the Resume button to continue, or add feedback below to guide the next proof attempt.</p>
+          {launchHtmlLink}
         </div>
       </div>
     );
@@ -248,6 +258,7 @@ export function LivePanel({ run }: LivePanelProps) {
           </div>
           <p className="live-stage-label" style={{ color: 'var(--green)' }}>Resuming proof…</p>
           <p className="drawer-muted">Restoring your proof context and continuing from the last checkpoint.</p>
+          {launchHtmlLink}
         </div>
       </div>
     );
@@ -264,6 +275,7 @@ export function LivePanel({ run }: LivePanelProps) {
           {dir && <blockquote className="drawer-direction-quote">{dir}</blockquote>}
           {hypothesis && !dir && <blockquote className="drawer-direction-quote">{hypothesis}</blockquote>}
           <p className="drawer-muted">Switch to the <strong>Paper</strong> tab to read the draft, or <strong>Proof</strong> for the theorem sketch.</p>
+          {launchHtmlLink}
         </div>
       </div>
     );
@@ -275,6 +287,7 @@ export function LivePanel({ run }: LivePanelProps) {
         <div className="live-thinking-view">
           <p className="live-stage-label" style={{ color: 'var(--red)' }}>✗ Session failed</p>
           <p className="drawer-muted">{run.error || 'An error occurred. Check the Logs tab for details.'}</p>
+          {launchHtmlLink}
         </div>
       </div>
     );

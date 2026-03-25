@@ -19,7 +19,7 @@ from eurekaclaw.config import settings
 
 from eurekaclaw.agents.theory.checkpoint import ProofCheckpoint
 from eurekaclaw.types.artifacts import TheoryState
-from eurekaclaw.console import console
+from eurekaclaw.console import console, UiHtmlLogHandler
 
 _console_html_path = Path("eurekaclaw_terminal.html")
 _should_save_html = False
@@ -29,11 +29,9 @@ def _save_console_html() -> None:
     """Export the terminal session to an HTML file on exit."""
     if not _should_save_html:
         return
-    import datetime
     try:
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        export_path = _console_html_path.with_name(f"eurekaclaw_terminal_{timestamp}.html")
-        console.save_html(str(export_path))
+        from eurekaclaw.main import save_console_html_artifact
+        save_console_html_artifact(_console_html_path.parent, stem=_console_html_path.stem)
     except Exception:
         pass
 
@@ -47,6 +45,12 @@ def setup_logging(verbose: bool = False) -> None:
         format="%(message)s",
         handlers=[RichHandler(console=console, rich_tracebacks=True, show_path=False)],
     )
+    root = logging.getLogger()
+    if not any(isinstance(handler, UiHtmlLogHandler) for handler in root.handlers):
+        html_handler = UiHtmlLogHandler()
+        html_handler.setLevel(level)
+        html_handler.setFormatter(logging.Formatter("%(message)s"))
+        root.addHandler(html_handler)
     logging.getLogger("anthropic").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -625,7 +629,7 @@ def install_skills(force: bool, skillname: str = "") -> None:
 def ui(host: str, port: int, open_browser: bool) -> None:
     """Launch the EurekaClaw browser UI."""
     global _should_save_html
-    _should_save_html = True
+    _should_save_html = False
 
     import threading
     import time
@@ -825,7 +829,7 @@ def _run_session(
 ) -> None:
     """Common session runner."""
     import os
-    from eurekaclaw.main import EurekaSession, save_artifacts
+    from eurekaclaw.main import EurekaSession, save_artifacts, save_console_html_artifact
     from eurekaclaw.types.tasks import InputSpec
 
     session = EurekaSession()
@@ -901,6 +905,7 @@ def _run_session(
         return
 
     out = save_artifacts(result, out_dir_path)
+    save_console_html_artifact(out)
     console.print(f"[green]Artifacts saved to {out}[/green]")
 
 

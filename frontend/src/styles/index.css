@@ -4607,6 +4607,21 @@ textarea {
   margin: 0;
 }
 
+.live-html-link-row {
+  margin: 2px 0 0;
+}
+
+.live-html-link {
+  color: var(--primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.live-html-link:hover {
+  text-decoration: underline;
+}
+
 /* ── Thinking dots animation ─────────────────────────────────────────────── */
 
 .thinking-dots {

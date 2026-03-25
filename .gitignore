@@ -55,7 +55,7 @@ required_sty/
 outputs/
 results/
 runs/
-
+launch_from_ui/
 # ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
 error.log
