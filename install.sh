@@ -38,6 +38,7 @@ ORIGINAL_PATH="${PATH:-}"
 OS="unknown"
 PYTHON_BIN=""
 EUREKACLAW_BIN=""
+UV_BIN=""
 
 # ── temp file cleanup ─────────────────────────────────────────────────────────
 TMPFILES=()
@@ -74,6 +75,39 @@ download_file() {
     else
         wget -q --https-only --secure-protocol=TLSv1_2 --tries=3 -O "$output" "$url"
     fi
+}
+
+# ── uv (fast Python package manager) ─────────────────────────────────────────
+uv_available() {
+    [[ -n "$UV_BIN" && -x "$UV_BIN" ]] && return 0
+    local bin; bin="$(command -v uv 2>/dev/null || true)"
+    if [[ -n "$bin" ]]; then UV_BIN="$bin"; return 0; fi
+    if [[ -x "$HOME/.local/bin/uv" ]]; then UV_BIN="$HOME/.local/bin/uv"; return 0; fi
+    return 1
+}
+
+install_uv() {
+    if uv_available; then
+        ui_success "uv found: $("$UV_BIN" --version 2>&1) (${UV_BIN})"
+        return 0
+    fi
+    ui_info "uv not found — installing"
+    local tmp; tmp="$(mktempfile)"
+    download_file "https://astral.sh/uv/install.sh" "$tmp" 2>/dev/null || {
+        ui_warn "uv download failed — will fall back to pip"
+        return 1
+    }
+    run_quiet_step "Installing uv" /bin/bash "$tmp" || {
+        ui_warn "uv install failed — will fall back to pip"
+        return 1
+    }
+    export PATH="${HOME}/.local/bin:${PATH}"
+    if uv_available; then
+        ui_success "uv installed: $("$UV_BIN" --version 2>&1)"
+        return 0
+    fi
+    ui_warn "uv not found after install — will fall back to pip"
+    return 1
 }
 
 # ── gum (optional interactive TUI) ───────────────────────────────────────────
@@ -415,6 +449,17 @@ require_sudo() {
 }
 
 install_python_macos() {
+    # Try uv first — no admin rights needed
+    if uv_available; then
+        if run_quiet_step "Installing Python 3.11 via uv" "$UV_BIN" python install 3.11; then
+            local uv_python; uv_python="$("$UV_BIN" python find 3.11 2>/dev/null || true)"
+            if [[ -n "$uv_python" && -x "$uv_python" ]]; then
+                PYTHON_BIN="$uv_python"; return 0
+            fi
+        fi
+        ui_warn "uv python install failed — falling back to Homebrew"
+    fi
+    # Fallback: Homebrew
     local brew_bin; brew_bin="$(resolve_brew_bin || true)"
     if [[ -z "$brew_bin" ]]; then
         ui_error "Homebrew is required to install Python on macOS"
@@ -423,13 +468,23 @@ install_python_macos() {
     activate_brew_for_session || true
     run_quiet_step "Installing Python 3.11" "$brew_bin" install python@3.11
     activate_brew_for_session || true
-    # Prepend Homebrew Python to PATH for this session
     local prefix; prefix="$("$brew_bin" --prefix python@3.11 2>/dev/null || true)"
     if [[ -d "${prefix}/bin" ]]; then export PATH="${prefix}/bin:${PATH}"; fi
     hash -r 2>/dev/null || true
 }
 
 install_python_linux() {
+    # Try uv first — no sudo needed
+    if uv_available; then
+        if run_quiet_step "Installing Python 3.11 via uv" "$UV_BIN" python install 3.11; then
+            local uv_python; uv_python="$("$UV_BIN" python find 3.11 2>/dev/null || true)"
+            if [[ -n "$uv_python" && -x "$uv_python" ]]; then
+                PYTHON_BIN="$uv_python"; return 0
+            fi
+        fi
+        ui_warn "uv python install failed — falling back to system package manager"
+    fi
+    # Fallback: system package manager (requires sudo)
     require_sudo
     if command -v apt-get &>/dev/null; then
         if is_root; then
@@ -472,6 +527,67 @@ install_python() {
         exit 1
     fi
     ui_success "Python installed: $("$PYTHON_BIN" --version 2>&1)"
+}
+
+# ── Node / npm ────────────────────────────────────────────────────────────────
+MIN_NODE_MAJOR=18
+NVM_VERSION="${EUREKACLAW_NVM_VERSION:-0.40.3}"
+
+node_version_ok() {
+    local bin="${1:-node}"
+    command -v "$bin" &>/dev/null || return 1
+    local major
+    major="$("$bin" -e 'process.stdout.write(String(process.versions.node.split(".")[0]))' 2>/dev/null || true)"
+    [[ "$major" =~ ^[0-9]+$ ]] && [[ "$major" -ge "$MIN_NODE_MAJOR" ]]
+}
+
+check_node() {
+    if node_version_ok; then
+        ui_success "Node.js found: $(node --version) / npm $(npm --version)"
+        return 0
+    fi
+    # nvm-managed node not yet on PATH — try loading nvm first
+    local nvm_sh="${NVM_DIR:-$HOME/.nvm}/nvm.sh"
+    if [[ -s "$nvm_sh" ]]; then
+        # shellcheck disable=SC1090
+        \. "$nvm_sh" 2>/dev/null || true
+        if node_version_ok; then
+            ui_success "Node.js found (via nvm): $(node --version) / npm $(npm --version)"
+            return 0
+        fi
+    fi
+    ui_info "Node.js ${MIN_NODE_MAJOR}+ not found — installing"
+    return 1
+}
+
+install_node() {
+    local nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+    local nvm_sh="${nvm_dir}/nvm.sh"
+
+    # Install nvm if not already present
+    if [[ ! -s "$nvm_sh" ]]; then
+        ui_info "Installing nvm ${NVM_VERSION}"
+        local tmp; tmp="$(mktempfile)"
+        download_file \
+            "https://raw.githubusercontent.com/nvm-sh/nvm/v${NVM_VERSION}/install.sh" \
+            "$tmp"
+        run_quiet_step "Installing nvm" /bin/bash "$tmp"
+    fi
+
+    # Load nvm into this shell session
+    export NVM_DIR="$nvm_dir"
+    # shellcheck disable=SC1090
+    \. "$nvm_sh" 2>/dev/null || true
+
+    run_quiet_step "Installing Node.js LTS" nvm install --lts
+    nvm use --lts >/dev/null 2>&1 || true
+
+    if ! node_version_ok; then
+        ui_error "Node.js installation failed or not on PATH"
+        echo "Install Node.js manually from https://nodejs.org and re-run the installer."
+        exit 1
+    fi
+    ui_success "Node.js installed: $(node --version) / npm $(npm --version)"
 }
 
 # ── git ───────────────────────────────────────────────────────────────────────
@@ -552,22 +668,44 @@ install_eurekaclaw_from_git() {
     # ── virtual environment ───────────────────────────────────────────────────
     local venv_dir="${repo_dir}/.venv"
     if [[ ! -d "$venv_dir" ]]; then
-        run_quiet_step "Creating virtual environment" "$PYTHON_BIN" -m venv "$venv_dir"
+        if uv_available; then
+            run_quiet_step "Creating virtual environment" \
+                "$UV_BIN" venv --seed --python "$PYTHON_BIN" "$venv_dir" \
+                || run_quiet_step "Creating virtual environment (fallback)" \
+                    "$PYTHON_BIN" -m venv "$venv_dir"
+        else
+            run_quiet_step "Creating virtual environment" "$PYTHON_BIN" -m venv "$venv_dir"
+        fi
         ui_success "Virtual environment created: ${venv_dir}"
     else
         ui_info "Virtual environment already exists: ${venv_dir}"
     fi
 
     local pip_bin="${venv_dir}/bin/pip"
-    run_quiet_step "Upgrading pip" "$pip_bin" install --quiet --upgrade pip
+    local venv_python="${venv_dir}/bin/python"
 
-    # ── pip install ───────────────────────────────────────────────────────────
+    # ── package install ───────────────────────────────────────────────────────
     local install_target="${repo_dir}"
     if [[ -n "$EXTRAS" ]]; then install_target="${repo_dir}[${EXTRAS}]"; fi
 
     ui_info "Installing EurekaClaw${EXTRAS:+ (extras: ${EXTRAS})}"
-    run_quiet_step "Installing EurekaClaw" "$pip_bin" install --quiet "$install_target"
+    if uv_available; then
+        run_quiet_step "Installing EurekaClaw" \
+            "$UV_BIN" pip install --python "$venv_python" "$install_target" \
+            || run_quiet_step "Installing EurekaClaw (fallback)" \
+                "$pip_bin" install --quiet "$install_target"
+    else
+        run_quiet_step "Upgrading pip" "$pip_bin" install --quiet --upgrade pip
+        run_quiet_step "Installing EurekaClaw" "$pip_bin" install --quiet "$install_target"
+    fi
     ui_success "EurekaClaw installed into virtual environment"
+
+    # ── frontend npm install ───────────────────────────────────────────────────
+    local frontend_dir="${repo_dir}/frontend"
+    if [[ -f "${frontend_dir}/package.json" ]]; then
+        run_quiet_step "Installing frontend dependencies" npm --prefix "$frontend_dir" install
+        ui_success "Frontend dependencies installed"
+    fi
 
     # ── shim ──────────────────────────────────────────────────────────────────
     ensure_user_local_bin_on_path
@@ -694,9 +832,10 @@ main() {
     # ── [1/3] Prepare environment ─────────────────────────────────────────────
     ui_stage "Preparing environment"
 
-    install_homebrew
-    check_python || install_python
-    check_git    || install_git
+    install_uv || true
+    check_python || { install_homebrew; install_python; }
+    check_git    || { install_homebrew; install_git; }
+    check_node   || install_node
 
     # ── [2/3] Install EurekaClaw ──────────────────────────────────────────────
     ui_stage "Installing EurekaClaw"
@@ -715,8 +854,13 @@ main() {
     # Installed version (from package metadata)
     local version=""
     if [[ -n "$EUREKACLAW_BIN" ]]; then
-        version="$("${GIT_DIR}/.venv/bin/pip" show eurekaclaw 2>/dev/null \
-                    | grep "^Version:" | cut -d' ' -f2 || true)"
+        if uv_available; then
+            version="$("$UV_BIN" pip show --python "${GIT_DIR}/.venv/bin/python" eurekaclaw 2>/dev/null \
+                        | grep "^Version:" | cut -d' ' -f2 || true)"
+        else
+            version="$("${GIT_DIR}/.venv/bin/pip" show eurekaclaw 2>/dev/null \
+                        | grep "^Version:" | cut -d' ' -f2 || true)"
+        fi
     fi
 
     echo ""
@@ -728,7 +872,13 @@ main() {
 
     ui_kv "Checkout"       "$GIT_DIR"
     ui_kv "Shim"           "$HOME/.local/bin/eurekaclaw"
-    ui_kv "Update command" "cd ${GIT_DIR} && git pull && ${GIT_DIR}/.venv/bin/pip install ."
+    local update_cmd
+    if uv_available; then
+        update_cmd="cd ${GIT_DIR} && git pull && ${UV_BIN} pip install --python ${GIT_DIR}/.venv/bin/python ."
+    else
+        update_cmd="cd ${GIT_DIR} && git pull && ${GIT_DIR}/.venv/bin/pip install ."
+    fi
+    ui_kv "Update command" "$update_cmd"
     echo ""
 }
 
