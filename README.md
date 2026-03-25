@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo-cropped.svg" width="100%" alt="EurekaClaw  — The Research Claw">
+  <img src="assets/logo-cropped.png" width="90%" alt="EurekaClaw  — The Research Claw">
 </p>
 
 <p align="center">

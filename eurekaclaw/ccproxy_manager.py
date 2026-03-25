@@ -109,11 +109,19 @@ def check_ccproxy_auth(provider: str = "claude_api") -> tuple[bool, str]:
     """
     try:
         exe = _ccproxy_exe() or "ccproxy"
+        env = os.environ.copy()
+        # Force UTF-8 I/O in the ccproxy subprocess so that rich's unicode
+        # output (✓/✗) does not crash on Windows terminals with GBK encoding.
+        env["PYTHONIOENCODING"] = "utf-8"
+        env["PYTHONUTF8"] = "1"
         result = subprocess.run(
             [exe, "auth", "status", provider],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
+            env=env,
         )
         import re as _re
 
@@ -167,17 +175,34 @@ def start_ccproxy(port: int) -> subprocess.Popen:
         FileNotFoundError: If ccproxy binary is not found.
     """
     exe = _ccproxy_exe() or "ccproxy"
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
     proc = subprocess.Popen(
         [exe, "serve", "--port", str(port)],
         stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        env=env,
     )
 
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         if proc.poll() is not None:
+            stderr_out = ""
+            if proc.stderr:
+                try:
+                    stderr_out = proc.stderr.read().decode("utf-8", errors="replace").strip()
+                except Exception:
+                    pass
+            detail = f": {stderr_out}" if stderr_out else ""
+            # EADDRINUSE / 10048 means the port is occupied by a stale process.
+            if "10048" in stderr_out or "address already in use" in stderr_out.lower():
+                raise RuntimeError(
+                    f"Port {port} is already in use and not responding to health checks.\n"
+                    "Kill the process occupying that port, or change CCPROXY_PORT in .env."
+                )
             raise RuntimeError(
-                f"ccproxy exited immediately with code {proc.returncode}"
+                f"ccproxy exited immediately with code {proc.returncode}{detail}"
             )
         if is_ccproxy_running(port):
             return proc
@@ -255,7 +280,16 @@ def _patch_ccproxy_oauth_header() -> None:
         if not ccproxy_bin:
             return
 
-        shebang = pathlib.Path(ccproxy_bin).read_text().splitlines()[0]
+        # On Windows, ccproxy ships as a compiled PE binary (.exe), not a
+        # Python script.  PE files start with the "MZ" magic bytes — skip the
+        # patch entirely in that case (no Python source to edit).
+        with open(ccproxy_bin, "rb") as _f:
+            magic = _f.read(2)
+        if magic == b"MZ":
+            logger.debug("ccproxy is a compiled binary; skipping adapter patch")
+            return
+
+        shebang = pathlib.Path(ccproxy_bin).read_text(encoding="utf-8", errors="replace").splitlines()[0]
         python_exe = shebang.lstrip("#!").strip()
 
         result = subprocess.run(
@@ -271,7 +305,7 @@ def _patch_ccproxy_oauth_header() -> None:
         if not src_file.exists():
             return
 
-        text = src_file.read_text()
+        text = src_file.read_text(encoding="utf-8")
 
         correct = 'filtered_headers["anthropic-beta"] = "oauth-2025-04-20"'
         cli_marker = "cli_headers = self._collect_cli_headers()"
@@ -294,7 +328,7 @@ def _patch_ccproxy_oauth_header() -> None:
         if patched == text:
             return
 
-        src_file.write_text(patched)
+        src_file.write_text(patched, encoding="utf-8")
         for pyc in src_file.parent.glob("__pycache__/adapter*.pyc"):
             pyc.unlink(missing_ok=True)
         logger.info("Auto-patched ccproxy adapter: set anthropic-beta=oauth-2025-04-20")

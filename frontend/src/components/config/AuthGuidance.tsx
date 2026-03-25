@@ -55,6 +55,48 @@ export function AuthGuidance({ backend, authMode, ccproxyPort }: AuthGuidancePro
         ],
       },
     ];
+  } else if (backend === 'codex' && authMode === 'oauth') {
+    title = 'Codex CLI setup guide';
+    steps = [
+      {
+        heading: 'Prerequisites',
+        items: [
+          'An active ChatGPT Plus or Pro subscription',
+          'Install the Codex CLI: npm install -g @openai/codex',
+          'Login with the Codex CLI: codex auth login',
+        ],
+      },
+      {
+        heading: 'In EurekaClaw',
+        items: [
+          'Click "Import" to read the Codex CLI token',
+          'Click "Save & test" to verify the connection',
+          'Uses the Responses API — billed to your ChatGPT subscription',
+        ],
+      },
+    ];
+    terminalCmds = `# Install and login with the Codex CLI:\nnpm install -g @openai/codex\ncodex auth login\n\n# Then import into EurekaClaw:\neurekaclaw login --provider openai-codex`;
+  } else if (backend === 'codex') {
+    title = 'OpenAI API key setup guide';
+    steps = [
+      {
+        heading: 'Steps',
+        items: [
+          'Get an API key from platform.openai.com',
+          'Paste it in the field above',
+          'Set the model (e.g. o4-mini)',
+          'Click "Save & test"',
+        ],
+      },
+      {
+        heading: 'Troubleshooting',
+        items: [
+          'Check for extra whitespace when pasting',
+          'Ensure key has Codex API access',
+          'Verify model name is correct',
+        ],
+      },
+    ];
   } else {
     title = 'OpenAI-compatible setup guide';
     steps = [

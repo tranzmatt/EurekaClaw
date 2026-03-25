@@ -2627,6 +2627,182 @@ textarea {
   background: rgba(46, 125, 98, 0.08);
 }
 
+/* ── Codex panel (Apple-style) ──────────────────────────────── */
+.codex-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.codex-auth-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.codex-segment-control {
+  display: flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.05);
+  gap: 2px;
+}
+
+.codex-segment-btn {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 180ms ease;
+  position: relative;
+}
+
+.codex-segment-btn.is-active {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.codex-segment-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--muted);
+  transition: color 180ms ease;
+}
+
+.codex-segment-btn.is-active .codex-segment-label {
+  color: var(--text);
+}
+
+.codex-auth-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+  padding-left: 2px;
+}
+
+/* Setup checklist (step indicators) */
+.codex-setup-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.02);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.codex-check-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 11px;
+  transition: background 180ms ease;
+}
+
+.codex-check-item:hover {
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.codex-check-item.is-done {
+  opacity: 0.7;
+}
+
+.codex-check-icon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.codex-check-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.codex-check-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.codex-check-desc {
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.3;
+}
+
+.codex-check-btn {
+  flex-shrink: 0;
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: none;
+  background: var(--primary);
+  color: #fff;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.codex-check-btn:hover:not(:disabled) {
+  background: var(--primary-strong);
+  transform: translateY(-0.5px);
+}
+
+.codex-check-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Model section with chips */
+.codex-model-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.codex-model-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.codex-model-chip {
+  padding: 5px 12px;
+  border-radius: 20px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  border: 1.5px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.8);
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 160ms ease;
+  font-family: "IBM Plex Mono", monospace;
+  letter-spacing: -0.01em;
+}
+
+.codex-model-chip:hover {
+  border-color: rgba(15, 106, 184, 0.3);
+  color: var(--primary);
+  background: rgba(243, 249, 255, 0.8);
+}
+
+.codex-model-chip.is-active {
+  border-color: var(--primary);
+  background: rgba(220, 234, 251, 0.45);
+  color: var(--primary-strong);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
 .settings-bottom-bar {
   padding: 18px 0 4px;
   display: flex;

@@ -23,6 +23,8 @@ export interface AppConfig {
   openai_compat_model?: string;
   minimax_api_key?: string;
   minimax_model?: string;
+  codex_auth_mode?: string;
+  codex_model?: string;
   eurekaclaw_mode?: string;
   gate_mode?: string;
   experiment_mode?: string;

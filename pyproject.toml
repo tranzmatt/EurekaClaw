@@ -40,6 +40,8 @@ docker = ["docker>=7.0"]
 openai = ["openai>=1.30"]
 # Claude Pro/Max via Claude Code OAuth tokens
 oauth = ["ccproxy-api>=0.2.4"]
+# OpenAI Codex via EurekaClaw built-in OAuth (eurekaclaw login --provider openai-codex)
+codex = ["openai>=1.30"]
 # Full-PDF extraction via Docling (arXiv PDF → theorem/lemma sections)
 pdf = ["docling>=2.0"]
 # Development & testing
