@@ -118,6 +118,9 @@ eurekaclaw explore "multi-armed bandit theory"
 
 # CLI — start from arXiv papers
 eurekaclaw from-papers 1706.03762 2005.14165 --domain "attention mechanisms"
+
+# Browser UI - recommended
+eurekaclaw ui --open-browser
 ```
 
 > No API key? Use a Claude Pro/Max subscription via [OAuth](https://eurekaclaw.github.io/getting-started/authentication.html#option-b-claude-pro-max-via-oauth).

@@ -118,6 +118,9 @@ eurekaclaw explore "multi-armed bandit theory"
 
 # CLI — 从 arXiv 论文出发
 eurekaclaw from-papers 1706.03762 2005.14165 --domain "attention mechanisms"
+
+# UI界面 — 推荐
+eurekaclaw ui --open-browser
 ```
 
 > 没有 API 密钥？通过 [OAuth](https://eurekaclaw.github.io/zh/getting-started/authentication.html#option-b-claude-pro-max-via-oauth) 使用 Claude Pro/Max 订阅。
