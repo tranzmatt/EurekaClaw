@@ -89,9 +89,15 @@ def create_client(
     if resolved_backend == "openai_compat":
         from eurekaclaw.llm.openai_compat import OpenAICompatAdapter
 
-        # Prefer live env var — codex_manager sets OPENAI_COMPAT_API_KEY at runtime
-        # (after the settings singleton is loaded), so we must re-read it here.
-        base_url = openai_base_url or settings.openai_compat_base_url or default_base_url
+        # Base URL selection is backend-specific.
+        # For Minimax, always prefer the built-in Minimax endpoint unless the
+        # caller explicitly overrides it; do not inherit OPENAI_COMPAT_BASE_URL.
+        if original_backend == "minimax":
+            base_url = openai_base_url or default_base_url
+        else:
+            # Prefer live env var — codex_manager sets OPENAI_COMPAT_API_KEY at runtime
+            # (after the settings singleton is loaded), so we must re-read it here.
+            base_url = openai_base_url or settings.openai_compat_base_url or default_base_url
 
         # Pick the right API key per backend.
         if openai_api_key:
