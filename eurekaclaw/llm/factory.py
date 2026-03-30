@@ -37,7 +37,8 @@ def create_client(
         backend:           Override for settings.llm_backend.
                            Values: "anthropic" (default), "openai_compat",
                                    "openrouter" (shortcut), "local" (shortcut),
-                                   "minimax" (shortcut), "codex".
+                                   "minimax" (shortcut), "codex",
+                                   "novita".
         anthropic_api_key: Override for settings.anthropic_api_key.
         openai_base_url:   Override for settings.openai_compat_base_url.
         openai_api_key:    Override for settings.openai_compat_api_key.
@@ -78,6 +79,14 @@ def create_client(
             api_key=api_key or "EMPTY",
             default_model=model,
             account_id=account_id,
+        )
+
+    if original_backend == "novita":
+        from eurekaclaw.llm.novita_adapter import NovitaAdapter
+
+        return NovitaAdapter(
+            api_key=openai_api_key or settings.novita_api_key or "EMPTY",
+            default_model=openai_model or settings.novita_model,
         )
 
     # ── Resolve backend aliases ────────────────────────────────────
