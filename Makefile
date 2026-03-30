@@ -38,11 +38,11 @@ typecheck:
 
 # ── First-time setup ──────────────────────────────────────────────────────────
 install:
-	pip install -e "."
+	python -m pip install -e "."
 	cd frontend && npm install
 
 # ── First-time setup with uv (faster) ────────────────────────────────────────
 uv-install:
-	uv venv --python 3.11 .venv
+	uv venv --python 3.11 --clear .venv
 	. .venv/bin/activate && uv pip install -e "."
 	cd frontend && npm install
