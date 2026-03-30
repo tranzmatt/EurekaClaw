@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Python
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist
+build
+
+# Node
+frontend/node_modules
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime data (mounted at runtime, not baked in)
+.env
+runs/
+
+# Docker
+Dockerfile*
+docker-compose*.yml

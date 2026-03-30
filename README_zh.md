@@ -78,6 +78,92 @@ powershell -c "irm https://eurekaclaw.ai/install_win.ps1 | iex"
 macOS/Linux 安装程序会克隆仓库、创建虚拟环境、安装 EurekaClaw，并将 `eurekaclaw` 命令添加到 PATH。之后运行 `eurekaclaw onboard` 以配置 API 密钥和设置。
 
 <details>
+<summary>Docker — 一行命令安装（推荐服务器用户 — 无需 sudo）</summary>
+
+**要求：** 仅需 Docker（用户在 `docker` 组中即可，无需 sudo、无需安装 Python、无需安装 Node.js）
+
+**Docker Hub 预构建镜像：**
+
+| 镜像 | 标签 | 大小 | 描述 |
+|---|---|---|---|
+| `chenggongzhang/eurekaclaw` | `latest` | ~10 GB | CPU — 内含 Python 3.11、Node.js 18、所有依赖 |
+| `chenggongzhang/eurekaclaw` | `gpu` | ~13 GB | GPU — NVIDIA CUDA 12.4 + 以上所有内容 |
+
+```bash
+# 拉取镜像（一次性，约 10 GB）
+docker pull chenggongzhang/eurekaclaw
+```
+
+**一行命令 — 启动浏览器 UI：**
+```bash
+docker run --rm -it -p 8080:8080 -e ANTHROPIC_API_KEY=sk-ant-... chenggongzhang/eurekaclaw
+# 浏览器打开 http://localhost:8080
+```
+
+**GPU 支持（NVIDIA）：**
+```bash
+docker run --rm -it -p 8080:8080 --gpus all \
+  -e ANTHROPIC_API_KEY=sk-ant-... chenggongzhang/eurekaclaw:gpu
+```
+
+**使用 `.env` 配置文件 + 数据持久化：**
+```bash
+# 先复制并编辑 .env: cp .env.example .env
+docker run --rm -it -p 8080:8080 --env-file .env \
+  -v ~/.eurekaclaw:/root/.eurekaclaw chenggongzhang/eurekaclaw
+```
+
+**CLI 模式（prove / explore / from-papers）：**
+```bash
+docker run --rm -it -e ANTHROPIC_API_KEY=sk-ant-... \
+  chenggongzhang/eurekaclaw prove "The sample complexity of transformers is O(L·d·log(d)/ε²)"
+
+docker run --rm -it -e ANTHROPIC_API_KEY=sk-ant-... \
+  chenggongzhang/eurekaclaw explore "multi-armed bandit theory"
+```
+
+**交互式终端（容器内有完整环境）：**
+```bash
+docker run --rm -it -e ANTHROPIC_API_KEY=sk-ant-... chenggongzhang/eurekaclaw bash
+# 容器内：eurekaclaw、python3、node、npm、uv 全部可用
+```
+
+**远程访问（从其他机器连接服务器上的 EurekaClaw）：**
+
+容器内 UI 默认绑定 `0.0.0.0`，同一网络内的其他机器可以直接访问：
+
+```bash
+# 在服务器上运行（将 sk-ant-... 替换为你的密钥）
+docker run --rm -it -p 8080:8080 -e ANTHROPIC_API_KEY=sk-ant-... chenggongzhang/eurekaclaw
+
+# 在你的笔记本上 — 浏览器打开 http://<服务器IP>:8080
+# 如果服务器在防火墙后面，使用 SSH 端口转发：
+ssh -L 8080:localhost:8080 user@server-ip
+# 然后在本地打开 http://localhost:8080
+```
+
+> **说明：** 服务器上无需 root/sudo 权限 — 只要有 Docker 权限即可。容器内部以 root 运行，因此在容器内安装软件包或写入文件不会有权限问题。
+
+**本地构建（可选）：**
+```bash
+git clone https://github.com/EurekaClaw/EurekaClaw && cd EurekaClaw
+make docker            # CPU 镜像
+make docker-gpu        # GPU 镜像（NVIDIA CUDA 12.4）
+make docker-run        # 运行 UI: http://localhost:8080
+```
+
+**Docker Compose：**
+```bash
+cp .env.example .env   # 编辑并填入 API key
+docker compose up                    # CPU — UI 在 http://localhost:8080
+docker compose --profile gpu up      # GPU（NVIDIA）
+docker compose --profile dev up      # 开发模式（热更新 :5173 + :7860）
+```
+
+完整配置参见 [docker-compose.yml](docker-compose.yml)。
+</details>
+
+<details>
 <summary>使用 uv 手动安装（推荐 — Linux / macOS）</summary>
 
 **要求：** Python ≥ 3.11，Node.js ≥ 18，Git，[uv](https://docs.astral.sh/uv/)

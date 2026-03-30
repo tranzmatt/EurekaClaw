@@ -1,0 +1,70 @@
+# ── EurekaClaw Docker Compose ─────────────────────────────────────────────────
+#
+# Quick start:
+#   cp .env.example .env          # edit .env with your API key
+#   docker compose up              # launch UI at http://localhost:8080
+#
+# GPU mode (NVIDIA):
+#   docker compose --profile gpu up
+#
+# Development mode (hot-reload):
+#   docker compose --profile dev up
+# ──────────────────────────────────────────────────────────────────────────────
+
+services:
+  # ── Production: serve pre-built UI ─────────────────────────────────────────
+  eurekaclaw:
+    build: .
+    image: chenggongzhang/eurekaclaw:latest
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - eurekaclaw-data:/root/.eurekaclaw
+    restart: unless-stopped
+
+  # ── GPU: same as above with NVIDIA GPU passthrough ─────────────────────────
+  eurekaclaw-gpu:
+    build:
+      context: .
+      args:
+        BASE_IMAGE: nvidia/cuda:12.4.1-runtime-ubuntu22.04
+    image: chenggongzhang/eurekaclaw:gpu
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - eurekaclaw-data:/root/.eurekaclaw
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    profiles:
+      - gpu
+
+  # ── Development: hot-reload frontend + backend ─────────────────────────────
+  eurekaclaw-dev:
+    build: .
+    image: chenggongzhang/eurekaclaw:latest
+    command: dev
+    ports:
+      - "5173:5173"
+      - "7860:7860"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+      - eurekaclaw-data:/root/.eurekaclaw
+      # Prevent host node_modules from overriding container's
+      - /app/frontend/node_modules
+    profiles:
+      - dev
+
+volumes:
+  eurekaclaw-data:
