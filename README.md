@@ -78,21 +78,55 @@ powershell -c "irm https://eurekaclaw.ai/install_win.ps1 | iex"
 The macOS/Linux installer clones the repo, creates a virtual environment, installs EurekaClaw, and adds the `eurekaclaw` command to your PATH. Run `eurekaclaw onboard` afterwards to configure your API key and settings.
 
 <details>
-<summary>Manual install (all platforms)</summary>
+<summary>Manual install with uv (recommended — Linux / macOS)</summary>
 
-**Requirements:** Python ≥ 3.11, Node.js ≥ 20, Git
+**Requirements:** Python ≥ 3.11, Node.js ≥ 18, Git, [uv](https://docs.astral.sh/uv/)
 
-- Linux/MacOS
+```bash
+# 1. Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. Clone the repository
+git clone https://github.com/EurekaClaw/EurekaClaw
+cd EurekaClaw
+
+# 3. Create a virtual environment with Python 3.11 and activate it
+uv venv --python 3.11 .venv
+source .venv/bin/activate
+
+# 4. Install Python dependencies + frontend
+uv pip install -e "."
+cd frontend && npm install && cd ..
+
+# 5. Post-install setup
+eurekaclaw install-skills     # install built-in proof skills
+eurekaclaw onboard            # configure API key and settings
+```
+</details>
+
+<details>
+<summary>Manual install with pip (Linux / macOS)</summary>
+
+**Requirements:** Python ≥ 3.11, Node.js ≥ 18, Git
+
 ```bash
 git clone https://github.com/EurekaClaw/EurekaClaw
 cd EurekaClaw
+python3 -m venv .venv
+source .venv/bin/activate
 make install                  # pip install -e "." + npm install (frontend)
 ```
-- Windows
+</details>
+
+<details>
+<summary>Manual install (Windows)</summary>
+
+**Requirements:** Python ≥ 3.11, Node.js ≥ 18, Git
+
 ```bash
 git clone https://github.com/EurekaClaw/EurekaClaw
 cd EurekaClaw
-powershell -ExecutionPolicy Bypass -File install_win.ps1    # pip install -e "." + npm install (frontend)
+powershell -ExecutionPolicy Bypass -File install_win.ps1
 ```
 </details>
 

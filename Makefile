@@ -13,9 +13,10 @@
 #
 # Install:
 #   make install          → pip install -e "." + npm install (frontend deps)
+#   make uv-install       → uv venv + uv pip install -e "." + npm install (faster)
 # ─────────────────────────────────────────────────────────────────────────────
 
-.PHONY: start open dev build typecheck install
+.PHONY: start open dev build typecheck install uv-install
 
 # ── Production: build then serve ─────────────────────────────────────────────
 start: build
@@ -37,5 +38,11 @@ typecheck:
 
 # ── First-time setup ──────────────────────────────────────────────────────────
 install:
-	pip install -e "."
+	python -m pip install -e "."
+	cd frontend && npm install
+
+# ── First-time setup with uv (faster) ────────────────────────────────────────
+uv-install:
+	uv venv --python 3.11 --clear .venv
+	. .venv/bin/activate && uv pip install -e "."
 	cd frontend && npm install

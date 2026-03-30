@@ -78,21 +78,55 @@ powershell -c "irm https://eurekaclaw.ai/install_win.ps1 | iex"
 macOS/Linux 安装程序会克隆仓库、创建虚拟环境、安装 EurekaClaw，并将 `eurekaclaw` 命令添加到 PATH。之后运行 `eurekaclaw onboard` 以配置 API 密钥和设置。
 
 <details>
-<summary>手动安装（所有平台）</summary>
+<summary>使用 uv 手动安装（推荐 — Linux / macOS）</summary>
 
-**要求：** Python ≥ 3.11，Node.js ≥ 20，Git
+**要求：** Python ≥ 3.11，Node.js ≥ 18，Git，[uv](https://docs.astral.sh/uv/)
 
-- Linux/MacOS
+```bash
+# 1. 安装 uv（如果尚未安装）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. 克隆仓库
+git clone https://github.com/EurekaClaw/EurekaClaw
+cd EurekaClaw
+
+# 3. 使用 Python 3.11 创建虚拟环境并激活
+uv venv --python 3.11 .venv
+source .venv/bin/activate
+
+# 4. 安装 Python 依赖 + 前端
+uv pip install -e "."
+cd frontend && npm install && cd ..
+
+# 5. 安装后配置
+eurekaclaw install-skills     # 安装内置证明技能
+eurekaclaw onboard            # 配置 API 密钥和设置
+```
+</details>
+
+<details>
+<summary>使用 pip 手动安装（Linux / macOS）</summary>
+
+**要求：** Python ≥ 3.11，Node.js ≥ 18，Git
+
 ```bash
 git clone https://github.com/EurekaClaw/EurekaClaw
 cd EurekaClaw
+python3 -m venv .venv
+source .venv/bin/activate
 make install                  # pip install -e "." + npm install (frontend)
 ```
-- Windows
+</details>
+
+<details>
+<summary>手动安装（Windows）</summary>
+
+**要求：** Python ≥ 3.11，Node.js ≥ 18，Git
+
 ```bash
 git clone https://github.com/EurekaClaw/EurekaClaw
 cd EurekaClaw
-powershell -ExecutionPolicy Bypass -File install_win.ps1    # pip install -e "." + npm install (frontend)
+powershell -ExecutionPolicy Bypass -File install_win.ps1
 ```
 </details>
 
