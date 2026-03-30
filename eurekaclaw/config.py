@@ -46,6 +46,10 @@ class Config(BaseSettings):
     minimax_api_key: str = Field(default="", alias="MINIMAX_API_KEY")
     minimax_model: str = Field(default="MiniMax-Text-01", alias="MINIMAX_MODEL")
 
+    # Novita (LLM_BACKEND=novita)
+    novita_api_key: str = Field(default="", alias="NOVITA_API_KEY")
+    novita_model: str = Field(default="moonshotai/kimi-k2.5", alias="NOVITA_MODEL")
+
     # OpenAI / Codex (LLM_BACKEND=codex)
     # "api_key" (default) — use OPENAI_COMPAT_API_KEY directly
     # "oauth"             — use EurekaClaw's built-in OAuth (run: eurekaclaw login --provider openai-codex)
@@ -148,6 +152,8 @@ class Config(BaseSettings):
         backend = self.llm_backend
         if backend == "minimax":
             return self.minimax_model
+        if backend == "novita":
+            return self.novita_model
         if backend == "codex":
             return self.codex_model
         if backend in ("openai_compat", "openrouter", "local"):
@@ -166,6 +172,8 @@ class Config(BaseSettings):
         if backend == "minimax":
             # Minimax exposes one model per endpoint; fast == main
             return self.minimax_model
+        if backend == "novita":
+            return self.novita_model
         if backend == "codex":
             return self.codex_model
         if backend in ("openai_compat", "openrouter", "local"):

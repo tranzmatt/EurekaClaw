@@ -10,6 +10,8 @@ Tests cover:
 import json
 import os
 import time
+import importlib
+import types
 from pathlib import Path
 from unittest.mock import patch
 
@@ -274,7 +276,9 @@ class TestCodexManager:
         """No-op when codex_auth_mode != 'oauth'."""
         from eurekaclaw.codex_manager import maybe_setup_codex_auth
 
-        with patch("eurekaclaw.config.settings") as mock_settings:
+        fake_config_module = types.SimpleNamespace(settings=types.SimpleNamespace())
+        with patch.dict("sys.modules", {"eurekaclaw.config": fake_config_module}):
+            mock_settings = fake_config_module.settings
             mock_settings.codex_auth_mode = "api_key"
             # Should return without doing anything
             maybe_setup_codex_auth()
@@ -288,11 +292,13 @@ class TestCodexManager:
         creds_dir = tmp_path / "creds"
         creds_dir.mkdir()
 
+        fake_config_module = types.SimpleNamespace(settings=types.SimpleNamespace())
         with (
             patch("eurekaclaw.codex_manager._CODEX_CLI_AUTH_PATH", missing_path),
             patch.object(token_store, "_creds_dir", return_value=creds_dir),
-            patch("eurekaclaw.config.settings") as mock_settings,
+            patch.dict("sys.modules", {"eurekaclaw.config": fake_config_module}),
         ):
+            mock_settings = fake_config_module.settings
             mock_settings.codex_auth_mode = "oauth"
             with pytest.raises(RuntimeError, match="no OpenAI Codex credentials found"):
                 maybe_setup_codex_auth()
@@ -309,11 +315,13 @@ class TestCodexManager:
 
         old = os.environ.get("OPENAI_COMPAT_API_KEY")
         try:
+            fake_config_module = types.SimpleNamespace(settings=types.SimpleNamespace())
             with (
                 patch("eurekaclaw.codex_manager._CODEX_CLI_AUTH_PATH", auth_path),
                 patch.object(token_store, "_creds_dir", return_value=creds_dir),
-                patch("eurekaclaw.config.settings") as mock_settings,
+                patch.dict("sys.modules", {"eurekaclaw.config": fake_config_module}),
             ):
+                mock_settings = fake_config_module.settings
                 mock_settings.codex_auth_mode = "oauth"
                 maybe_setup_codex_auth()
 
@@ -349,11 +357,12 @@ class TestFactoryCodexBackend:
         import sys
         with patch.dict(sys.modules, {"eurekaclaw.llm.openai_compat": fake_module}):
             # Re-import to pick up the patched module
-            import importlib
             import eurekaclaw.llm.factory as factory_mod
             importlib.reload(factory_mod)
 
-            with patch("eurekaclaw.config.settings") as mock_settings:
+            fake_config_module = types.SimpleNamespace(settings=types.SimpleNamespace())
+            with patch.dict(sys.modules, {"eurekaclaw.config": fake_config_module}):
+                mock_settings = fake_config_module.settings
                 mock_settings.codex_auth_mode = "api_key"
                 mock_settings.llm_backend = "codex"
                 mock_settings.openai_compat_base_url = ""
@@ -385,11 +394,12 @@ class TestFactoryCodexBackend:
 
             import sys
             with patch.dict(sys.modules, {"eurekaclaw.llm.openai_compat": fake_module}):
-                import importlib
                 import eurekaclaw.llm.factory as factory_mod
                 importlib.reload(factory_mod)
 
-                with patch("eurekaclaw.config.settings") as mock_settings:
+                fake_config_module = types.SimpleNamespace(settings=types.SimpleNamespace())
+                with patch.dict(sys.modules, {"eurekaclaw.config": fake_config_module}):
+                    mock_settings = fake_config_module.settings
                     mock_settings.codex_auth_mode = "api_key"
                     mock_settings.llm_backend = "codex"
                     mock_settings.openai_compat_base_url = ""
@@ -409,3 +419,45 @@ class TestFactoryCodexBackend:
                 os.environ["OPENAI_COMPAT_API_KEY"] = old
             else:
                 os.environ.pop("OPENAI_COMPAT_API_KEY", None)
+
+
+class TestFactoryNovitaBackend:
+    def test_novita_alias_resolves_to_openai_compat(self):
+        from eurekaclaw.llm.factory import _BACKEND_ALIASES
+
+        assert "novita" in _BACKEND_ALIASES
+        resolved_backend, base_url = _BACKEND_ALIASES["novita"]
+        assert resolved_backend == "openai_compat"
+        assert base_url == "https://api.novita.ai/openai"
+
+    def test_create_client_novita_backend(self):
+        """create_client(backend='novita') calls NovitaAdapter with the Novita key and model."""
+        from unittest.mock import MagicMock
+
+        MockCls = MagicMock()
+        fake_module = MagicMock(NovitaAdapter=MockCls)
+
+        import sys
+        with patch.dict(sys.modules, {"eurekaclaw.llm.novita_adapter": fake_module}):
+            import eurekaclaw.llm.factory as factory_mod
+            importlib.reload(factory_mod)
+
+            fake_config_module = types.SimpleNamespace(settings=types.SimpleNamespace())
+            with patch.dict(sys.modules, {"eurekaclaw.config": fake_config_module}):
+                mock_settings = fake_config_module.settings
+                mock_settings.llm_backend = "novita"
+                mock_settings.novita_api_key = "novita-test-key"
+                mock_settings.novita_model = "moonshotai/kimi-k2.5"
+
+                factory_mod.create_client(backend="novita")
+
+                MockCls.assert_called_once_with(
+                    api_key="novita-test-key",
+                    default_model="moonshotai/kimi-k2.5",
+                )
+
+    def test_config_defines_novita_env_vars(self):
+        config_text = Path("eurekaclaw/config.py").read_text()
+
+        assert "NOVITA_API_KEY" in config_text
+        assert "NOVITA_MODEL" in config_text
