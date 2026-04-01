@@ -53,7 +53,7 @@ dev = [
 ]
 # Install everything at once (except system-level Lean4/pdflatex)
 all = [
-    "eurekaclaw[embeddings,docker,openai,pdf]",
+    "eurekaclaw[embeddings,docker,openai,oauth,codex,pdf]",
 ]
 
 [project.scripts]
