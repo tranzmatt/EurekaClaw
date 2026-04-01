@@ -130,14 +130,15 @@ docker run --rm -it -e ANTHROPIC_API_KEY=sk-ant-... chenggongzhang/eurekaclaw ba
 
 **远程服务器访问（SSH）：**
 
-容器内 UI 默认绑定 `0.0.0.0`，通过 SSH 端口转发从笔记本访问：
+使用 `--network host` 让容器直接共享宿主机网络 — 无需 `-p` 端口映射，OAuth 回调也直接可用：
 
 ```bash
 # 第一步：SSH 连接服务器并转发端口
 ssh -L 8080:localhost:8080 user@server-ip
 
-# 第二步：在服务器上启动容器
-docker run --rm -it -p 8080:8080 -e ANTHROPIC_API_KEY=sk-ant-... chenggongzhang/eurekaclaw
+# 第二步：在服务器上用 host 网络模式启动容器
+docker run --rm -it --network host \
+  -e ANTHROPIC_API_KEY=sk-ant-... chenggongzhang/eurekaclaw
 
 # 第三步：在笔记本浏览器打开 http://localhost:8080
 ```
@@ -148,34 +149,32 @@ docker run --rm -it -p 8080:8080 -e ANTHROPIC_API_KEY=sk-ant-... chenggongzhang/
 
 *方式 A — API Key（最简单）：*
 ```bash
-docker run --rm -it -p 8080:8080 \
+docker run --rm -it --network host \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   chenggongzhang/eurekaclaw
 ```
 
 *方式 B — OAuth 登录 Claude Pro/Max（无需 API Key）：*
 
-OAuth 需要浏览器授权。在远程服务器上，需要通过 SSH 同时转发 UI 端口（8080）和 OAuth 回调端口（54545）：
-
 ```bash
-# 第一步：SSH 连接时转发两个端口（从笔记本执行）
+# 第一步：SSH 连接时转发 UI 端口 + OAuth 回调端口（从笔记本执行）
 ssh -L 8080:localhost:8080 -L 54545:localhost:54545 user@server-ip
 
-# 第二步：在服务器上启动容器，暴露回调端口
-docker run --rm -it -p 8080:8080 -p 54545:54545 \
+# 第二步：用 host 网络模式启动容器 + 持久化凭证
+docker run --rm -it --network host \
   -v ~/.config/ccproxy:/root/.config/ccproxy \
   -v ~/.eurekaclaw:/root/.eurekaclaw \
   chenggongzhang/eurekaclaw bash
 
-# 第三步：在容器内执行 OAuth 登录
+# 第三步：在容器内执行 OAuth 登录（仅首次需要）
 ccproxy auth login claude_api
 # 复制打印的 URL → 粘贴到笔记本浏览器 → 完成授权
 
-# 第四步：登录成功后，启动 EurekaClaw
+# 第四步：启动 EurekaClaw
 ANTHROPIC_AUTH_MODE=oauth eurekaclaw ui --host 0.0.0.0 --port 8080
 
-# 后续运行：凭证已保存在 ~/.config/ccproxy（挂载的卷），只需登录一次：
-docker run --rm -it -p 8080:8080 \
+# 后续运行 — 凭证已保存，无需重新登录：
+docker run --rm -it --network host \
   -e ANTHROPIC_AUTH_MODE=oauth \
   -v ~/.config/ccproxy:/root/.config/ccproxy \
   -v ~/.eurekaclaw:/root/.eurekaclaw \
