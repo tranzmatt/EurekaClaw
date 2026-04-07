@@ -139,7 +139,14 @@ function Test-PythonVersion {
 $candidates = @("python", "python3", "python3.13", "python3.12", "python3.11")
 foreach ($c in $candidates) {
     $resolved = Get-Command $c -ErrorAction SilentlyContinue
-    if ($resolved -and (Test-PythonVersion $resolved.Source)) {
+    if (-not $resolved) { continue }
+    # Skip any Python that lives inside the currently-active virtual environment.
+    # Using a venv's interpreter to bootstrap a new venv can produce a broken
+    # "nested venv" and may fail if ensurepip is unavailable inside the venv.
+    if ($env:VIRTUAL_ENV -and $resolved.Source.StartsWith($env:VIRTUAL_ENV, [System.StringComparison]::OrdinalIgnoreCase)) {
+        continue
+    }
+    if (Test-PythonVersion $resolved.Source) {
         $PythonBin = $resolved.Source
         break
     }

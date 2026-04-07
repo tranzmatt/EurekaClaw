@@ -431,6 +431,14 @@ find_python() {
     for bin in "${candidates[@]}"; do
         local resolved
         resolved="$(command -v "$bin" 2>/dev/null || true)"
+        # Skip any Python that lives inside the currently-active virtual
+        # environment.  Using a venv's interpreter to bootstrap a new venv
+        # can fail on systems where the venv Python lacks ensurepip (e.g.
+        # Debian/Ubuntu python3-venv not installed into the venv), and can
+        # produce a broken "nested venv" on other systems.
+        if [[ -n "${VIRTUAL_ENV:-}" && "$resolved" == "${VIRTUAL_ENV}"/* ]]; then
+            continue
+        fi
         if [[ -n "$resolved" ]] && python_version_ok "$resolved"; then
             PYTHON_BIN="$resolved"
             return 0
