@@ -181,6 +181,7 @@ export interface Artifacts {
   theory_state?: TheoryState;
   experiment_result?: ExperimentResult;
   resource_analysis?: Record<string, unknown> | null;
+  paper_qa_answer?: string | null;
 }
 
 // ── InputSpec ─────────────────────────────────────────────────────────────────

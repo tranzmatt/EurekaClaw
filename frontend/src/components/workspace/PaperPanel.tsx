@@ -25,6 +25,7 @@ export function PaperPanel({ run }: PaperPanelProps) {
   const isRunning = run?.status === 'running';
   const isFailed = run?.status === 'failed';
 
+  const qaAnswer = run?.artifacts?.paper_qa_answer as string | undefined;
   const [latexOpen, setLatexOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [compiling, setCompiling] = useState(false);
@@ -233,6 +234,15 @@ export function PaperPanel({ run }: PaperPanelProps) {
                 <pre className="paper-latex-code"><code>{paperText}</code></pre>
               </div>
             )}
+          </div>
+        )}
+        {/* Q&A / Rebuttal answer */}
+        {qaAnswer && (
+          <div className="paper-latex-section" style={{ marginTop: '1rem' }}>
+            <p style={{ fontWeight: 600, marginBottom: '0.5rem' }}>💬 Rebuttal / Answer</p>
+            <pre className="paper-latex-code" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {qaAnswer}
+            </pre>
           </div>
         )}
       </div>

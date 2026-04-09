@@ -26,6 +26,9 @@ class PaperQAAgent(BaseAgent):
     def get_tool_names(self) -> list[str]:
         return []
 
+    def _role_system_prompt(self, task: Task) -> str:
+        return _SYSTEM
+
     async def execute(self, task: Task) -> AgentResult:
         latex_paper = self.bus.get("paper_qa_latex") or ""
         question = self.bus.get("paper_qa_question") or task.description or ""

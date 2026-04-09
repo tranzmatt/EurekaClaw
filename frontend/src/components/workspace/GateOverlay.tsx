@@ -265,8 +265,26 @@ function PaperQAGate({ run }: Props) {
       <div className="gate-overlay-body">
         <p className="gate-overlay-heading">📄 Paper generated</p>
         <p className="gate-overlay-sub">
-          Your paper is ready. Download it from the artifacts panel, then decide if you'd like to ask a follow-up question.
+          Your paper is ready. Download it below, then decide if you'd like to ask a follow-up question.
         </p>
+        <div className="gate-btn-row" style={{ marginBottom: '0.75rem' }}>
+          <a
+            href={`/api/runs/${run.run_id}/artifacts/paper.tex`}
+            target="_blank"
+            rel="noreferrer"
+            className="btn btn-secondary"
+          >
+            ⬇ Download paper.tex
+          </a>
+          <a
+            href={`/api/runs/${run.run_id}/artifacts/paper.pdf`}
+            target="_blank"
+            rel="noreferrer"
+            className="btn btn-secondary"
+          >
+            ⬇ Download paper.pdf
+          </a>
+        </div>
         <div className="gate-btn-row">
           <button className="btn btn-primary" disabled={submitting} onClick={() => setWantsQA(true)}>
             Ask a question

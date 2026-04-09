@@ -215,6 +215,8 @@ class MetaOrchestrator:
 
             # Execute orchestrator tasks (no agent needed)
             if task.agent_role == "orchestrator":
+                if task.name == "paper_qa_gate":
+                    await self._handle_paper_qa_gate(pipeline, brief)
                 task.mark_completed()
                 continue
 
@@ -267,9 +269,6 @@ class MetaOrchestrator:
 
             if task.name == "survey":
                 await self._handle_empty_survey_fallback(pipeline)
-
-            if task.name == "writer" and not result.failed:
-                await self._handle_paper_qa_gate(pipeline, brief)
 
             self.bus.put_pipeline(pipeline)
 
@@ -756,7 +755,9 @@ class MetaOrchestrator:
             from eurekaclaw.agents.paper_qa.agent import PaperQAAgent
             from eurekaclaw.types.tasks import Task
             from eurekaclaw.types.agents import AgentRole
+            import uuid as _uuid
             qa_task = Task(
+                task_id=str(_uuid.uuid4()),
                 name="paper_qa",
                 agent_role=AgentRole.WRITER,
                 description=decision.question,
@@ -766,6 +767,7 @@ class MetaOrchestrator:
                 bus=self.bus,
                 tool_registry=self.tool_registry,
                 skill_injector=self.skill_injector,
+                memory=self.memory,
                 client=self.client,
             )
             result = await agent.execute(qa_task)

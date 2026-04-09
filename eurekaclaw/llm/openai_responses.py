@@ -138,6 +138,8 @@ class OpenAIResponsesAdapter(LLMClient):
                         f"ChatGPT Codex API error ({resp.status_code}): {err_detail}"
                     )
 
+                collected_texts: list[str] = []
+                collected_tool_calls: list[dict] = []
                 async for line in resp.aiter_lines():
                     if not line.strip():
                         continue
@@ -147,7 +149,16 @@ class OpenAIResponsesAdapter(LLMClient):
                             break
                         try:
                             event = json.loads(data_str)
-                            if event.get("type") == "response.completed":
+                            etype = event.get("type", "")
+                            if etype == "response.output_text.done":
+                                text = event.get("text", "")
+                                if text:
+                                    collected_texts.append(text)
+                            elif etype == "response.output_item.done":
+                                item = event.get("item", {})
+                                if item.get("type") == "function_call":
+                                    collected_tool_calls.append(item)
+                            elif etype == "response.completed":
                                 full_response = event.get("response", {})
                         except json.JSONDecodeError:
                             continue
@@ -170,6 +181,19 @@ class OpenAIResponsesAdapter(LLMClient):
                 f"ChatGPT Codex API returned status=failed: "
                 f"{error.get('message', 'unknown error') if isinstance(error, dict) else error}"
             )
+
+        # Codex sometimes returns output=[] in the completed response even though
+        # text arrived via response.output_text.done events. Patch it here.
+        if not full_response.get("output") and (collected_texts or collected_tool_calls):
+            synthetic_output = []
+            if collected_texts:
+                synthetic_output.append({
+                    "type": "message",
+                    "content": [{"type": "output_text", "text": "\n".join(collected_texts)}],
+                })
+            for tc in collected_tool_calls:
+                synthetic_output.append(tc)
+            full_response = {**full_response, "output": synthetic_output}
 
         normalized = self._normalize(full_response)
         if not normalized.content:
