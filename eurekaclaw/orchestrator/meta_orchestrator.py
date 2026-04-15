@@ -709,110 +709,28 @@ class MetaOrchestrator:
         return True
 
     async def _handle_paper_qa_gate(self, pipeline: TaskPipeline, brief: ResearchBrief) -> None:
-        """After writer completes, offer the user a chance to ask a question.
+        """After writer completes, offer the user a chance to review the paper.
 
-        UI mode: shows a gate overlay.  The user can choose:
-          - "no"       → do nothing, pipeline continues to post-run learning.
-          - "rebuttal" → run PaperQAAgent to answer the question; store answer on bus.
-          - "rewrite"  → re-run theory + writer with the question as additional feedback.
-
-        CLI mode: always skips (non-interactive).
+        Delegates to PaperQAHandler which manages:
+        - CLI y/N prompt (default skip)
+        - Multi-turn QA with tool-equipped PaperQAAgent
+        - Unlimited rewrite cycles (theory + writer re-run)
+        - Paper versioning and QA history persistence
+        - Graceful failure recovery with rollback
         """
-        import os
-        if not os.environ.get("EUREKACLAW_UI_MODE"):
-            return
+        from eurekaclaw.orchestrator.paper_qa_handler import PaperQAHandler
 
-        from eurekaclaw.ui import review_gate
-        from eurekaclaw.types.tasks import TaskStatus
-
-        session_id = self.bus.session_id
-
-        # Find or create the paper_qa_gate task in the pipeline
-        qa_gate_task = next((t for t in pipeline.tasks if t.name == "paper_qa_gate"), None)
-        if qa_gate_task is not None:
-            qa_gate_task.status = TaskStatus.AWAITING_GATE
-            self.bus.put_pipeline(pipeline)
-
-        # Put the LaTeX on the bus so the gate and agent can read it
-        writer_task = next((t for t in pipeline.tasks if t.name == "writer"), None)
-        latex_paper = ""
-        if writer_task and writer_task.outputs:
-            latex_paper = writer_task.outputs.get("latex_paper", "")
-        self.bus.put("paper_qa_latex", latex_paper)
-
-        decision = review_gate.wait_paper_qa(session_id)
-
-        if qa_gate_task is not None:
-            qa_gate_task.status = TaskStatus.COMPLETED
-            self.bus.put_pipeline(pipeline)
-
-        if decision.action == "no" or not decision.question.strip():
-            return
-
-        self.bus.put("paper_qa_question", decision.question)
-
-        if decision.action == "rebuttal":
-            from eurekaclaw.agents.paper_qa.agent import PaperQAAgent
-            from eurekaclaw.types.tasks import Task
-            from eurekaclaw.types.agents import AgentRole
-            import uuid as _uuid
-            qa_task = Task(
-                task_id=str(_uuid.uuid4()),
-                name="paper_qa",
-                agent_role=AgentRole.WRITER,
-                description=decision.question,
-            )
-            qa_task.mark_started()
-            agent = PaperQAAgent(
-                bus=self.bus,
-                tool_registry=self.tool_registry,
-                skill_injector=self.skill_injector,
-                memory=self.memory,
-                client=self.client,
-            )
-            result = await agent.execute(qa_task)
-            if result.failed:
-                logger.warning("PaperQAAgent failed: %s", result.error)
-            else:
-                qa_task.mark_completed(dict(result.output))
-                console.print(f"[green]✓ Rebuttal answer generated[/green]")
-                if result.text_summary:
-                    console.print(f"  {result.text_summary}")
-
-        elif decision.action == "rewrite":
-            # Inject question as feedback into theory task, then re-run theory + writer
-            theory_task = next((t for t in pipeline.tasks if t.name == "theory"), None)
-            writer_task_rw = next((t for t in pipeline.tasks if t.name == "writer"), None)
-            if theory_task is not None:
-                theory_task.description = (theory_task.description or "") + (
-                    f"\n\n[User revision request]: {decision.question}"
-                )
-                theory_task.retries = 0
-                theory_task.status = TaskStatus.PENDING
-            if writer_task_rw is not None:
-                writer_task_rw.retries = 0
-                writer_task_rw.status = TaskStatus.PENDING
-            self.bus.put_pipeline(pipeline)
-            console.print("[blue]Re-running theory + writer with user feedback…[/blue]")
-            # Re-execute only theory and writer tasks
-            for task in pipeline.tasks:
-                if task.name not in ("theory", "writer"):
-                    continue
-                if task.status != TaskStatus.PENDING:
-                    continue
-                task.mark_started()
-                agent = self.router.resolve(task)
-                result = await agent.execute(task)
-                if result.failed:
-                    task.mark_failed(result.error)
-                    console.print(f"[red]✗ Failed: {task.name}: {result.error[:100]}[/red]")
-                    break
-                task_outputs = dict(result.output)
-                if result.text_summary:
-                    task_outputs["text_summary"] = result.text_summary
-                task.mark_completed(task_outputs)
-                console.print(f"[green]✓ Done: {task.name}[/green]")
-            self.bus.put_pipeline(pipeline)
+        handler = PaperQAHandler(
+            bus=self.bus,
+            agents=self.agents,
+            router=self.router,
+            client=self.client,
+            tool_registry=self.tool_registry,
+            skill_injector=self.skill_injector,
+            memory=self.memory,
+            gate_controller=self.gate,
+        )
+        await handler.run(pipeline, brief)
 
     def _collect_outputs(self, brief: ResearchBrief) -> ResearchOutput:
         import json
