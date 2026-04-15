@@ -91,54 +91,85 @@ class PaperQAHandler:
     async def _run_ui_mode(
         self, pipeline: TaskPipeline, brief: ResearchBrief, latex: str
     ) -> None:
-        """UI mode: use review_gate event system instead of CLI prompts."""
+        """UI mode: use review_gate event system instead of CLI prompts.
+
+        Loops until the user chooses "no" (accept). After each rebuttal or
+        rewrite the gate is re-armed so the frontend can submit again.
+        """
         from eurekaclaw.ui import review_gate
 
         session_id = self.bus.session_id
-
-        # Mark gate as awaiting so frontend shows the overlay
         qa_gate_task = next(
             (t for t in pipeline.tasks if t.name == "paper_qa_gate"), None
         )
-        if qa_gate_task is not None:
-            qa_gate_task.status = TaskStatus.AWAITING_GATE
-            self.bus.put_pipeline(pipeline)
 
-        decision = review_gate.wait_paper_qa(session_id)
+        while True:
+            # Mark gate as awaiting so frontend shows the overlay
+            if qa_gate_task is not None:
+                qa_gate_task.status = TaskStatus.AWAITING_GATE
+                self.bus.put_pipeline(pipeline)
 
-        if qa_gate_task is not None:
-            qa_gate_task.status = TaskStatus.COMPLETED
-            self.bus.put_pipeline(pipeline)
+            decision = review_gate.wait_paper_qa(session_id)
 
-        if decision.action == "no" or not decision.question.strip():
-            return
+            if qa_gate_task is not None:
+                qa_gate_task.status = TaskStatus.COMPLETED
+                self.bus.put_pipeline(pipeline)
 
-        self.bus.put("paper_qa_question", decision.question)
+            if decision.action == "no" or not decision.question.strip():
+                return
 
-        if decision.action == "rebuttal":
-            agent = self._get_or_create_qa_agent()
-            result = await agent.ask(
-                question=decision.question, latex=latex, history=[]
-            )
-            if result.failed:
-                logger.warning("PaperQAAgent failed: %s", result.error)
-            else:
-                console.print("[green]Rebuttal answer generated[/green]")
+            self.bus.put("paper_qa_question", decision.question)
 
-        elif decision.action == "rewrite":
-            # Inject feedback and re-run theory + writer
-            self._history.append({
-                "role": "user",
-                "content": decision.question,
-                "ts": datetime.now(timezone.utc).isoformat(),
-                "version": self._paper_version,
-            })
-            new_latex = await self._do_rewrite(
-                pipeline, brief, revision_prompt=decision.question
-            )
-            if new_latex is not None:
-                self._save_paper_version(new_latex)
-                self.bus.put("paper_qa_latex", new_latex)
+            if decision.action == "rebuttal":
+                agent = self._get_or_create_qa_agent()
+                result = await agent.ask(
+                    question=decision.question, latex=latex, history=[
+                        {"role": h["role"], "content": h["content"]}
+                        for h in self._history
+                    ],
+                )
+                if result.failed:
+                    logger.warning("PaperQAAgent failed: %s", result.error)
+                else:
+                    console.print("[green]Rebuttal answer generated[/green]")
+                    # Store answer for frontend to display
+                    self._history.append({
+                        "role": "user",
+                        "content": decision.question,
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "version": self._paper_version,
+                    })
+                    self._history.append({
+                        "role": "assistant",
+                        "content": result.output.get("answer", ""),
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "version": self._paper_version,
+                    })
+                    self._persist_history()
+
+            elif decision.action == "rewrite":
+                self._history.append({
+                    "role": "user",
+                    "content": decision.question,
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                    "version": self._paper_version,
+                })
+                new_latex = await self._do_rewrite(
+                    pipeline, brief, revision_prompt=decision.question
+                )
+                if new_latex is not None:
+                    self._save_paper_version(new_latex)
+                    latex = new_latex
+                    self.bus.put("paper_qa_latex", latex)
+                else:
+                    # Rewrite failed — notify frontend, keep current paper
+                    console.print(
+                        "[yellow]Rewrite failed — keeping current "
+                        f"paper (v{self._paper_version})[/yellow]"
+                    )
+
+            # Re-arm the gate for the next round
+            review_gate.reset_paper_qa(session_id)
 
     # ------------------------------------------------------------------
     # Review loops
