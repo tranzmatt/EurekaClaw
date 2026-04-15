@@ -194,6 +194,13 @@ def submit_paper_qa(session_id: str, decision: PaperQADecision) -> bool:
     return True
 
 
+def reset_paper_qa(session_id: str) -> None:
+    """Re-arm the paper QA gate for another review round after rewrite."""
+    with _lock:
+        if session_id in _paper_qa:
+            _paper_qa[session_id] = _GateEntry()
+
+
 # ── Cleanup ───────────────────────────────────────────────────────────────────
 
 def unregister_all(session_id: str) -> None:
