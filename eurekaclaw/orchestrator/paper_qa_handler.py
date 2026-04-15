@@ -306,14 +306,18 @@ class PaperQAHandler:
             f"Revision instructions:\n{revision_prompt}"
         )
 
-        # Reset theory and writer tasks
+        # Snapshot previous task outputs so we can restore on failure
         theory_task = next(
             (t for t in pipeline.tasks if t.name == "theory"), None
         )
         writer_task = next(
             (t for t in pipeline.tasks if t.name == "writer"), None
         )
+        prev_theory_outputs = dict(theory_task.outputs) if theory_task else {}
+        prev_writer_outputs = dict(writer_task.outputs) if writer_task else {}
+        prev_theory_desc = theory_task.description if theory_task else ""
 
+        # Reset theory and writer tasks for re-execution
         if theory_task is not None:
             theory_task.description = (theory_task.description or "") + feedback
             theory_task.retries = 0
@@ -325,6 +329,7 @@ class PaperQAHandler:
         self.bus.put_pipeline(pipeline)
         console.print("[blue]Re-running theory + writer with feedback...[/blue]")
 
+        rewrite_failed = False
         try:
             for task in pipeline.tasks:
                 if task.name not in ("theory", "writer"):
@@ -350,7 +355,8 @@ class PaperQAHandler:
                             "paper with [TODO] markers[/yellow]"
                         )
                         continue
-                    return None
+                    rewrite_failed = True
+                    break
 
                 task_outputs = dict(result.output)
                 if result.text_summary:
@@ -358,15 +364,28 @@ class PaperQAHandler:
                 task.mark_completed(task_outputs)
                 console.print(f"[green]Done: {task.name}[/green]")
 
-            self.bus.put_pipeline(pipeline)
-
-            # Extract new LaTeX
-            return self._get_latex_from_pipeline(pipeline)
-
         except Exception as e:
             logger.exception("Rewrite failed: %s", e)
             console.print(f"[red]Rewrite error: {e}[/red]")
+            rewrite_failed = True
+
+        if rewrite_failed:
+            # Restore tasks to COMPLETED with their previous outputs so
+            # the pipeline stays in a consistent state for the next round.
+            if theory_task is not None:
+                theory_task.status = TaskStatus.COMPLETED
+                theory_task.outputs = prev_theory_outputs
+                theory_task.error_message = ""
+                theory_task.description = prev_theory_desc
+            if writer_task is not None:
+                writer_task.status = TaskStatus.COMPLETED
+                writer_task.outputs = prev_writer_outputs
+                writer_task.error_message = ""
+            self.bus.put_pipeline(pipeline)
             return None
+
+        self.bus.put_pipeline(pipeline)
+        return self._get_latex_from_pipeline(pipeline)
 
     # ------------------------------------------------------------------
     # CLI prompts
