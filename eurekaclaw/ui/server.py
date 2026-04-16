@@ -1848,11 +1848,13 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 self._send_json({"error": "No question provided"}, status=HTTPStatus.BAD_REQUEST)
                 return
 
-            bus = getattr(run, "bus", None)
-            if bus is None:
-                session = _active_sessions.get(session_id)
-                bus = getattr(session, "bus", None) if session else None
-            latex = bus.get("paper_qa_latex") or "" if bus else ""
+            session = run.eureka_session
+            bus = session.bus if session else None
+            latex = (bus.get("paper_qa_latex") or "") if bus else ""
+
+            if not bus:
+                self._send_json({"error": "No active bus for this session"}, status=HTTPStatus.BAD_REQUEST)
+                return
 
             import asyncio as _asyncio
             from eurekaclaw.agents.paper_qa.agent import PaperQAAgent
@@ -1862,7 +1864,7 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             from eurekaclaw.memory.manager import MemoryManager
             from eurekaclaw.llm import create_client
 
-            tool_registry = build_default_registry(bus=bus) if bus else build_default_registry()
+            tool_registry = build_default_registry(bus=bus)
             agent = PaperQAAgent(
                 bus=bus,
                 tool_registry=tool_registry,
