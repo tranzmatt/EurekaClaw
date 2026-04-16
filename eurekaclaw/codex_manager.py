@@ -65,7 +65,7 @@ def _read_codex_cli_tokens() -> dict[str, Any] | None:
         "access_token": tokens["access_token"],
         "refresh_token": tokens.get("refresh_token", ""),
         "id_token": tokens.get("id_token", ""),
-        "account_id": tokens.get("account_id", ""),
+        "account_id": tokens.get("account_id", "") or raw.get("account_id", ""),
         "auth_mode": raw.get("auth_mode", "chatgpt"),
         "last_refresh": raw.get("last_refresh", ""),
         # No expires_in in Codex CLI format — token_store.is_token_expired
@@ -146,6 +146,9 @@ def maybe_setup_codex_auth() -> None:
     from eurekaclaw.config import settings
 
     if settings.codex_auth_mode != "oauth":
+        # Clear any stale OAuth env vars from a previous session that
+        # used oauth mode in the same process.
+        os.environ.pop("CODEX_ACCOUNT_ID", None)
         return
 
     tokens = _load_valid_tokens()
