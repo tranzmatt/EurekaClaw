@@ -3,6 +3,7 @@ import { LivePanel } from './LivePanel';
 import { ProofPanel } from './ProofPanel';
 import { PaperPanel } from './PaperPanel';
 import { LogsPanel } from './LogsPanel';
+import { PaperReviewPanel } from './paper-review/PaperReviewPanel';
 import type { SessionRun } from '@/types';
 
 interface WorkspaceTabsProps {
@@ -21,6 +22,18 @@ type TabKey = typeof TABS[number]['key'];
 export function WorkspaceTabs({ run }: WorkspaceTabsProps) {
   const activeWsTab = useUiStore((s) => s.activeWsTab);
   const setActiveWsTab = useUiStore((s) => s.setActiveWsTab);
+
+  // Full-panel takeover when paper_qa_gate is active
+  const paperQATask = run?.pipeline?.find((t) => t.name === 'paper_qa_gate');
+  const isReviewActive = paperQATask?.status === 'awaiting_gate';
+
+  if (isReviewActive && run) {
+    return (
+      <div className="workspace-main-col">
+        <PaperReviewPanel run={run} />
+      </div>
+    );
+  }
 
   return (
     <div className="workspace-main-col">
