@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import type { SessionRun } from '@/types';
 import { titleCase, humanize } from '@/lib/formatters';
 import { apiPost } from '@/api/client';
+import { useUiStore } from '@/store/uiStore';
 
 interface PaperPanelProps {
   run: SessionRun | null;
@@ -24,6 +25,18 @@ export function PaperPanel({ run }: PaperPanelProps) {
   const isCompleted = run?.status === 'completed';
   const isRunning = run?.status === 'running';
   const isFailed = run?.status === 'failed';
+
+  const setReviewSessionId = useUiStore((s) => s.setReviewSessionId);
+
+  const handleReviewPaper = async () => {
+    if (!run?.run_id) return;
+    try {
+      await apiPost(`/api/runs/${run.run_id}/review`, {});
+      setReviewSessionId(run.run_id);
+    } catch (e) {
+      console.error('Failed to activate review:', e);
+    }
+  };
 
   const qaAnswer = run?.artifacts?.paper_qa_answer as string | undefined;
   const [latexOpen, setLatexOpen] = useState(false);
@@ -188,6 +201,12 @@ export function PaperPanel({ run }: PaperPanelProps) {
               </span>
             )}
           </div>
+        )}
+
+        {isCompleted && paperText && (
+          <button className="btn btn-primary" onClick={handleReviewPaper} style={{ marginTop: '0.75rem' }}>
+            Review Paper
+          </button>
         )}
 
         {/* LaTeX source code collapsible */}
