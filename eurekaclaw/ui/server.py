@@ -1471,19 +1471,29 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             if _art_filename not in _allowed:
                 self._send_json({"error": "File not found"}, status=HTTPStatus.NOT_FOUND)
                 return
-            # At gate time paper.tex may only exist in memory — persist it
-            if not _art_path.is_file() and _art_filename == "paper.tex":
-                session = _art_run.eureka_session
-                bus = session.bus if session else None
-                if bus:
-                    pipeline = bus.get_pipeline()
-                    if pipeline:
-                        wt = next((t for t in pipeline.tasks if t.name == "writer"), None)
-                        if wt and wt.outputs:
-                            _latex = wt.outputs.get("latex_paper", "")
+            # Always sync the latest paper.tex from memory so downloads
+            # and PDF iframe embeds reflect the current version (not a
+            # stale copy from before a rewrite).
+            if _art_filename in ("paper.tex", "paper.pdf"):
+                _session = _art_run.eureka_session
+                _bus = _session.bus if _session else None
+                if _bus:
+                    _pipeline = _bus.get_pipeline()
+                    if _pipeline:
+                        _wt = next((t for t in _pipeline.tasks if t.name == "writer"), None)
+                        if _wt and _wt.outputs:
+                            _latex = _wt.outputs.get("latex_paper", "")
                             if _latex:
-                                _art_path.parent.mkdir(parents=True, exist_ok=True)
-                                _art_path.write_text(_latex, encoding="utf-8")
+                                _tex = Path(_art_run.output_dir) / "paper.tex"
+                                _tex.parent.mkdir(parents=True, exist_ok=True)
+                                # Only rewrite if content changed
+                                _old = _tex.read_text(encoding="utf-8") if _tex.is_file() else ""
+                                if _latex != _old:
+                                    _tex.write_text(_latex, encoding="utf-8")
+                                    # Invalidate stale PDF when .tex changes
+                                    _stale_pdf = Path(_art_run.output_dir) / "paper.pdf"
+                                    if _stale_pdf.is_file():
+                                        _stale_pdf.unlink()
             if not _art_path.is_file():
                 self._send_json({"error": "File not found"}, status=HTTPStatus.NOT_FOUND)
                 return
@@ -1719,23 +1729,30 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 self._send_json({"error": "No output directory"}, status=HTTPStatus.BAD_REQUEST)
                 return
             tex_path = Path(run.output_dir) / "paper.tex"
-            # At gate time paper.tex may not be on disk yet — write it
-            # from the writer task's in-memory output if available.
-            if not tex_path.is_file():
-                session = run.eureka_session
-                bus = session.bus if session else None
-                latex = ""
-                if bus:
-                    pipeline = bus.get_pipeline()
-                    if pipeline:
-                        wt = next((t for t in pipeline.tasks if t.name == "writer"), None)
-                        if wt and wt.outputs:
-                            latex = wt.outputs.get("latex_paper", "")
-                if not latex:
-                    self._send_json({"error": "No paper.tex found"}, status=HTTPStatus.BAD_REQUEST)
-                    return
+            # Always sync the latest LaTeX from the writer task's
+            # in-memory output to disk. At gate time paper.tex may not
+            # exist yet, and after a rewrite the on-disk copy is stale.
+            session = run.eureka_session
+            bus = session.bus if session else None
+            latex_mem = ""
+            if bus:
+                pipeline = bus.get_pipeline()
+                if pipeline:
+                    wt = next((t for t in pipeline.tasks if t.name == "writer"), None)
+                    if wt and wt.outputs:
+                        latex_mem = wt.outputs.get("latex_paper", "")
+            if latex_mem:
                 tex_path.parent.mkdir(parents=True, exist_ok=True)
-                tex_path.write_text(latex, encoding="utf-8")
+                old_tex = tex_path.read_text(encoding="utf-8") if tex_path.is_file() else ""
+                if latex_mem != old_tex:
+                    tex_path.write_text(latex_mem, encoding="utf-8")
+                    # Remove stale PDF so it gets freshly compiled
+                    stale_pdf = Path(run.output_dir) / "paper.pdf"
+                    if stale_pdf.is_file():
+                        stale_pdf.unlink()
+            if not tex_path.is_file():
+                self._send_json({"error": "No paper.tex found"}, status=HTTPStatus.BAD_REQUEST)
+                return
             try:
                 _compile_pdf(tex_path, settings.latex_bin)
                 pdf_path = Path(run.output_dir) / "paper.pdf"
