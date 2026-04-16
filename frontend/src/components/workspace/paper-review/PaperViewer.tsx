@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { apiPost } from '@/api/client';
 import { RewriteOverlay } from './RewriteOverlay';
 import type { SessionRun } from '@/types';
@@ -21,39 +21,48 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
   const [activeTab, setActiveTab] = useState<'pdf' | 'latex'>('pdf');
   const [compiling, setCompiling] = useState(false);
   const [compileError, setCompileError] = useState('');
-  const [compiledPdfPath, setCompiledPdfPath] = useState<string | null>(null);
+  // Whether a PDF is available to display in the iframe.
+  // Set true after successful compile or after HEAD-probing the artifact.
+  const [pdfAvailable, setPdfAvailable] = useState(false);
   const [prevVersion, setPrevVersion] = useState(paperVersion);
-  // Track whether a rewrite has happened since mount. When it has,
-  // run.result?.pdf_path may point to a deleted stale file.
-  const [hadRewrite, setHadRewrite] = useState(false);
 
-  // Reset compiled PDF state when paper version changes (after rewrite)
-  // so the iframe doesn't show a stale/deleted PDF.
+  // Reset PDF state when paper version changes (after rewrite).
   if (paperVersion !== prevVersion) {
     setPrevVersion(paperVersion);
-    setCompiledPdfPath(null);
+    setPdfAvailable(false);
     setCompileError('');
-    setHadRewrite(true);
   }
 
-  // Also clear when a rewrite starts so the overlay replaces the iframe
+  // Clear when a rewrite starts so the overlay replaces the iframe.
   const [wasRewriting, setWasRewriting] = useState(isRewriting);
   if (isRewriting && !wasRewriting) {
-    setCompiledPdfPath(null);
+    setPdfAvailable(false);
     setCompileError('');
   }
   if (isRewriting !== wasRewriting) {
     setWasRewriting(isRewriting);
   }
 
+  // On mount and when version changes, probe whether paper.pdf exists
+  // on the server. This handles page refresh after a prior compile.
+  const pdfUrl = `/api/runs/${run.run_id}/artifacts/paper.pdf`;
+  useEffect(() => {
+    if (pdfAvailable || isRewriting) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch(pdfUrl, { method: 'HEAD' });
+        if (!cancelled && res.ok) setPdfAvailable(true);
+      } catch {
+        // PDF not available — that's fine
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [pdfUrl, paperVersion, isRewriting, pdfAvailable]);
+
   // Source LaTeX from writer task outputs (available during gate) or fallback to run.result
   const writerTask = run.pipeline?.find((t) => t.name === 'writer');
   const latexSource = (writerTask?.outputs?.latex_paper as string) || run.result?.latex_paper || '';
-  // After an explicit compile, use compiledPdfPath. On fresh mount (no
-  // rewrite yet), fall back to run.result.pdf_path so already-compiled
-  // PDFs display without requiring a re-compile. After a rewrite the
-  // on-disk PDF was deleted, so ignore run.result.pdf_path.
-  const pdfPath = compiledPdfPath || (hadRewrite ? null : run.result?.pdf_path) || null;
   const lineCount = latexSource ? latexSource.split('\n').length : 0;
 
   const compilePdf = useCallback(async () => {
@@ -62,7 +71,7 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
     try {
       const res = await apiPost<CompileResponse>(`/api/runs/${run.run_id}/compile-pdf`, {});
       if (res.ok) {
-        setCompiledPdfPath(res.pdf_path || 'compiled');
+        setPdfAvailable(true);
       } else {
         setCompileError(res.error || 'Compilation failed');
       }
@@ -98,7 +107,7 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
             ⬇ .tex
           </a>
           <a
-            href={`/api/runs/${run.run_id}/artifacts/paper.pdf`}
+            href={pdfUrl}
             target="_blank"
             rel="noreferrer"
             className="pv-download-btn"
@@ -110,10 +119,10 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
 
       <div className="pv-content">
         {activeTab === 'pdf' ? (
-          pdfPath ? (
+          pdfAvailable ? (
             <iframe
               className="pv-pdf-frame"
-              src={`/api/runs/${run.run_id}/artifacts/paper.pdf`}
+              src={pdfUrl}
               title="Paper PDF"
             />
           ) : (
@@ -143,7 +152,7 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
             </span>
           </>
         )}
-        {!isRewriting && pdfPath && <span className="pv-compiled-badge">Compiled</span>}
+        {!isRewriting && pdfAvailable && <span className="pv-compiled-badge">Compiled</span>}
       </div>
 
       {isRewriting && (
