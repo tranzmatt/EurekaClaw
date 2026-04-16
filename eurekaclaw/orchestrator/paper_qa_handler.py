@@ -88,6 +88,36 @@ class PaperQAHandler:
 
         await self._review_loop(pipeline, brief, latex)
 
+    async def run_historical(
+        self, pipeline: TaskPipeline, brief: ResearchBrief
+    ) -> None:
+        """Enter review loop for a historical session (skip the y/N prompt).
+
+        Used by CLI `eurekaclaw review` and UI "Review Paper" button.
+        """
+        latex = self._get_latex_from_pipeline(pipeline)
+        if not latex:
+            latex = self.bus.get("paper_qa_latex") or ""
+        if not latex:
+            console.print("[red]No paper LaTeX found in this session.[/red]")
+            return
+
+        self._save_paper_version(latex)
+        self.bus.put("paper_qa_latex", latex)
+
+        # Load existing QA history from disk if available
+        history_file = self._session_dir / "paper_qa_history.jsonl"
+        if history_file.exists():
+            import json as _json
+            for line in history_file.read_text(encoding="utf-8").strip().split("\n"):
+                if line.strip():
+                    try:
+                        self._history.append(_json.loads(line))
+                    except _json.JSONDecodeError:
+                        pass
+
+        await self._review_loop(pipeline, brief, latex)
+
     async def _run_ui_mode(
         self, pipeline: TaskPipeline, brief: ResearchBrief, latex: str
     ) -> None:
