@@ -1,26 +1,30 @@
 :root {
-  --bg: #f7f5ef;
-  --bg-soft: #fbfaf6;
-  --surface: rgba(255, 253, 248, 0.84);
-  --surface-strong: #fffdf9;
-  --surface-cool: rgba(241, 246, 251, 0.82);
-  --line: rgba(27, 63, 104, 0.12);
-  --line-strong: rgba(18, 84, 150, 0.2);
-  --text: #1d2736;
-  --muted: #5f6b7a;
-  --primary: #0f6ab8;
-  --primary-strong: #0b4f8a;
-  --primary-soft: #dceafb;
-  --accent: #b9783b;
-  --accent-soft: #ead2bb;
-  --ok: #547765;
-  --warn: #9b6b30;
-  --idle: #6e7784;
-  --shadow: 0 22px 48px rgba(18, 37, 66, 0.08);
-  --radius-xl: 28px;
-  --radius-lg: 20px;
-  --radius-md: 14px;
-  --sidebar-width: 290px;
+  --bg: #f5f7fa;
+  --bg-soft: #fafbfd;
+  --surface: rgba(255, 255, 255, 0.85);
+  --surface-strong: #ffffff;
+  --surface-cool: rgba(237, 244, 252, 0.85);
+  --line: rgba(15, 60, 120, 0.08);
+  --line-strong: rgba(15, 60, 120, 0.15);
+  --text: #1a2332;
+  --muted: #5c6b7f;
+  --dim: #a0aab8;
+  --primary: #0a6dc4;
+  --primary-strong: #085a9e;
+  --primary-soft: #dfeaf8;
+  --accent: #b87333;
+  --accent-soft: #f0e0d0;
+  --ok: #2d8659;
+  --warn: #c47f17;
+  --idle: #7d8694;
+  --mono: "SF Mono", "IBM Plex Mono", ui-monospace, monospace;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.10);
+  --radius-xl: 20px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --sidebar-width: 280px;
 }
 
 * {
@@ -33,16 +37,13 @@ html {
 
 body {
   margin: 0;
-  font-family: "Space Grotesk", sans-serif;
+  font-family: -apple-system, "SF Pro Text", "Helvetica Neue", "Space Grotesk", sans-serif;
   color: var(--text);
-  background:
-    linear-gradient(rgba(31, 98, 171, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(31, 98, 171, 0.045) 1px, transparent 1px),
-    radial-gradient(circle at top left, rgba(185, 120, 59, 0.12), transparent 18rem),
-    radial-gradient(circle at right 18%, rgba(15, 106, 184, 0.14), transparent 22rem),
-    linear-gradient(180deg, #fbfaf6 0%, #f4f2eb 100%);
-  background-size: 46px 46px, 46px 46px, auto, auto, auto;
+  background: var(--bg);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.01em;
 }
 
 button,
@@ -939,7 +940,7 @@ img {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.8);
   font-size: 0.84rem;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   color: var(--text);
   transition: border-color 160ms ease;
 }
@@ -1261,13 +1262,13 @@ textarea {
 }
 
 .token-value {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-weight: 600;
   color: var(--primary-strong);
 }
 
 .token-breakdown {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   color: var(--muted);
   font-size: 0.88rem;
 }
@@ -1287,7 +1288,7 @@ textarea {
 
 .mono-label,
 .step-index {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
 }
 
 .pipeline-list,
@@ -1464,7 +1465,7 @@ textarea {
   align-items: center;
   padding: 2px 10px;
   border-radius: 12px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.03em;
@@ -1502,7 +1503,7 @@ textarea {
   display: inline-flex;
   gap: 8px;
   font-size: 0.78rem;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
 }
 
 .paper-stat {
@@ -1525,7 +1526,7 @@ textarea {
 }
 
 .paper-output-dir code {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.68rem;
   background: rgba(0, 0, 0, 0.04);
   padding: 2px 6px;
@@ -1655,7 +1656,7 @@ textarea {
   font-size: 0.72rem;
   font-weight: 400;
   color: var(--muted);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
 }
 
 .paper-latex-viewer {
@@ -1697,7 +1698,7 @@ textarea {
 .paper-latex-code {
   margin: 0;
   padding: 16px 18px;
-  font-family: "Fira Code", "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.78rem;
   line-height: 1.55;
   color: #d4d8e0;
@@ -1891,7 +1892,7 @@ textarea {
 
 .wizard-item-code {
   display: block;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.78rem;
   background: rgba(18, 37, 66, 0.05);
   border: 1px solid var(--line);
@@ -2487,7 +2488,7 @@ textarea {
   border-radius: 10px;
   background: rgba(24, 36, 49, 0.92);
   color: #f4efe6;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.82rem;
   overflow-x: auto;
 }
@@ -2806,7 +2807,7 @@ textarea {
   color: var(--muted);
   cursor: pointer;
   transition: all 160ms ease;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   letter-spacing: -0.01em;
 }
 
@@ -3080,7 +3081,7 @@ textarea {
   background: rgba(24, 36, 49, 0.92);
   color: #f4efe6;
   overflow-x: auto;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.86rem;
 }
 
@@ -3202,7 +3203,7 @@ textarea {
   background: rgba(24, 36, 49, 0.94);
   color: #f4efe6;
   overflow: auto;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.84rem;
   line-height: 1.6;
 }
@@ -3782,7 +3783,7 @@ textarea {
 
 /* Session ID chip */
 .proof-ctrl-session-id {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: 0.68rem;
   color: var(--muted);
   background: rgba(100, 116, 139, 0.07);
@@ -3873,7 +3874,7 @@ textarea {
 .failed-session-note-error {
   margin: 0;
   padding: 0 14px 10px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.72rem;
   color: #9f2f2f;
   line-height: 1.5;
@@ -3952,7 +3953,7 @@ textarea {
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   line-height: 1.4;
 }
 
@@ -5037,7 +5038,7 @@ textarea {
 
 .proof-theorem-text {
   margin: 0;
-  font-family: "Fira Code", "JetBrains Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.8rem;
   white-space: pre-wrap;
   word-break: break-word;
@@ -5116,7 +5117,7 @@ textarea {
 .proof-lemma-formal {
   font-size: 0.74rem;
   color: var(--muted);
-  font-family: "Fira Code", monospace;
+  font-family: var(--mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -5479,7 +5480,7 @@ textarea {
 
 .drawer-paper-excerpt {
   font-size: 0.75rem;
-  font-family: "Fira Code", monospace;
+  font-family: var(--mono);
   color: var(--muted);
   white-space: pre-wrap;
   word-break: break-word;
@@ -5841,7 +5842,7 @@ textarea {
   border-radius: 8px;
   padding: 14px 16px;
   font-size: 0.82rem;
-  font-family: "Fira Code", "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   white-space: pre-wrap;
   word-break: break-word;
   margin-bottom: 18px;

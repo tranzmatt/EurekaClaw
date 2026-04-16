@@ -89,7 +89,7 @@
 
 .pv-latex-source {
   padding: 16px;
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--mono);
   font-size: 0.78rem;
   line-height: 1.6;
   white-space: pre-wrap;
