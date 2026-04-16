@@ -17,18 +17,50 @@ function pipelineEventLabel(taskName: string, status: string, error?: string): s
 }
 
 function PipelineTimeline({ tasks, run }: { tasks: PipelineTask[]; run: SessionRun }) {
-  const events = tasks
-    .filter((t) => t.started_at || t.completed_at)
-    .map((t) => ({
-      time: t.completed_at || t.started_at || run.created_at,
-      label: pipelineEventLabel(t.name, t.status, t.error_message),
-      failed: t.status === 'failed',
-    }))
-    .sort((a, b) => {
-      const tA = parseServerTimestamp(a.time)?.getTime() ?? 0;
-      const tB = parseServerTimestamp(b.time)?.getTime() ?? 0;
-      return tA - tB;
-    });
+  const events: { time: string | undefined; label: string; failed: boolean }[] = [];
+
+  // Session creation event
+  if (run.created_at) {
+    events.push({ time: run.created_at, label: 'Session created', failed: false });
+  }
+
+  // Two events per task: started + completed/failed
+  for (const t of tasks) {
+    if (t.started_at) {
+      events.push({
+        time: t.started_at,
+        label: pipelineEventLabel(t.name, 'in_progress'),
+        failed: false,
+      });
+    }
+    if (t.completed_at && t.status === 'completed') {
+      events.push({
+        time: t.completed_at,
+        label: pipelineEventLabel(t.name, 'completed'),
+        failed: false,
+      });
+    }
+    if (t.status === 'failed') {
+      events.push({
+        time: t.completed_at || t.started_at,
+        label: pipelineEventLabel(t.name, 'failed', t.error_message),
+        failed: true,
+      });
+    }
+    if (t.status === 'skipped') {
+      events.push({
+        time: t.started_at || t.completed_at,
+        label: pipelineEventLabel(t.name, 'skipped'),
+        failed: false,
+      });
+    }
+  }
+
+  events.sort((a, b) => {
+    const tA = parseServerTimestamp(a.time)?.getTime() ?? 0;
+    const tB = parseServerTimestamp(b.time)?.getTime() ?? 0;
+    return tA - tB;
+  });
 
   if (!events.length) return null;
 
