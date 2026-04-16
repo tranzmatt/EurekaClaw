@@ -1,3 +1,5 @@
+@import './paper-review.css';
+
 :root {
   --bg: #f5f7fa;
   --bg-soft: #fafbfd;
@@ -5999,4 +6001,4 @@ textarea {
   color: var(--dim);
 }
 
-@import './paper-review.css';
+/* paper-review.css is imported at the top of this file */
