@@ -146,9 +146,10 @@ def maybe_setup_codex_auth() -> None:
     from eurekaclaw.config import settings
 
     if settings.codex_auth_mode != "oauth":
-        # Clear any stale OAuth env vars from a previous session that
+        # Clear all stale OAuth env vars from a previous session that
         # used oauth mode in the same process.
         os.environ.pop("CODEX_ACCOUNT_ID", None)
+        os.environ.pop("OPENAI_COMPAT_API_KEY", None)
         return
 
     tokens = _load_valid_tokens()
