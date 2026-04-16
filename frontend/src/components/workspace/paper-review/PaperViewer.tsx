@@ -43,26 +43,52 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
     setWasRewriting(isRewriting);
   }
 
-  // On mount and when version changes, probe whether paper.pdf exists
-  // on the server. This handles page refresh after a prior compile.
+  // On mount and when version changes, check if PDF exists. If not,
+  // auto-compile it so the user sees the PDF immediately.
   const pdfUrl = `/api/runs/${run.run_id}/artifacts/paper.pdf`;
   useEffect(() => {
-    if (pdfAvailable || isRewriting) return;
+    if (pdfAvailable || isRewriting || compiling) return;
     let cancelled = false;
     void (async () => {
       try {
-        // Use GET + AbortController instead of HEAD — the server
-        // only implements do_GET/do_POST, not do_HEAD.
         const ctrl = new AbortController();
         const res = await fetch(pdfUrl, { signal: ctrl.signal });
-        ctrl.abort(); // stop downloading the body
-        if (!cancelled && res.ok) setPdfAvailable(true);
+        ctrl.abort();
+        if (cancelled) return;
+        if (res.ok) {
+          setPdfAvailable(true);
+        } else {
+          // PDF not found — auto-compile if LaTeX is available
+          const wt = run.pipeline?.find((t) => t.name === 'writer');
+          const hasLatex = !!(
+            (wt?.outputs?.latex_paper) || run.result?.latex_paper
+          );
+          if (hasLatex) {
+            setCompiling(true);
+            try {
+              const compileRes = await apiPost<CompileResponse>(
+                `/api/runs/${run.run_id}/compile-pdf`, {}
+              );
+              if (!cancelled) {
+                if (compileRes.ok) {
+                  setPdfAvailable(true);
+                } else {
+                  setCompileError(compileRes.error || 'Compilation failed');
+                }
+              }
+            } catch (e) {
+              if (!cancelled) setCompileError(String(e));
+            } finally {
+              if (!cancelled) setCompiling(false);
+            }
+          }
+        }
       } catch {
-        // PDF not available — that's fine
+        // Network error — ignore
       }
     })();
     return () => { cancelled = true; };
-  }, [pdfUrl, paperVersion, isRewriting, pdfAvailable]);
+  }, [pdfUrl, paperVersion, isRewriting, pdfAvailable, compiling, run.run_id, run.pipeline, run.result]);
 
   // Source LaTeX from writer task outputs (available during gate) or fallback to run.result
   const writerTask = run.pipeline?.find((t) => t.name === 'writer');
@@ -130,13 +156,25 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
               title="Paper PDF"
             />
           ) : (
-            <div style={{ padding: '2rem', textAlign: 'center' }}>
-              <p style={{ color: 'var(--muted)', marginBottom: '1rem' }}>
-                {compileError || 'PDF not yet compiled.'}
-              </p>
-              <button className="btn btn-primary" onClick={compilePdf} disabled={compiling}>
-                {compiling ? 'Compiling...' : 'Compile PDF'}
-              </button>
+            <div className="paper-empty-state">
+              {compiling ? (
+                <>
+                  <div className="paper-progress-dots"><span /><span /><span /></div>
+                  <p>Compiling PDF...</p>
+                </>
+              ) : compileError ? (
+                <>
+                  <p style={{ color: 'var(--warn)', marginBottom: '1rem' }}>{compileError}</p>
+                  <button className="btn btn-primary" onClick={compilePdf}>
+                    Retry
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="paper-progress-dots"><span /><span /><span /></div>
+                  <p>Preparing PDF...</p>
+                </>
+              )}
             </div>
           )
         ) : (

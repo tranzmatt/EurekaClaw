@@ -2023,7 +2023,19 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                             pass
                     self._send_json({"error": "Rewrite failed — original paper restored"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             except Exception as e:
-                self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                # Restore from backup on unexpected exception
+                if backup_dir.is_dir():
+                    if session_dir.is_dir():
+                        _shutil.rmtree(session_dir)
+                    backup_dir.rename(session_dir)
+                    try:
+                        from eurekaclaw.orchestrator.session_loader import SessionLoader as _SL2
+                        restored_bus, _, _ = _SL2.load(session_id)
+                        if run.eureka_session:
+                            run.eureka_session.bus = restored_bus
+                    except Exception:
+                        pass
+                self._send_json({"error": f"Rewrite error — original paper restored: {e}"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             return
 
         # ── Paper QA endpoints ────────────────────────────────────────────
