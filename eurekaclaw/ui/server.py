@@ -1474,6 +1474,29 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             self._send_file(_art_path)
             return
 
+        # GET /api/runs/<run_id>/paper-qa/history
+        parts_pqa = parsed.path.strip("/").split("/")
+        if (len(parts_pqa) == 5 and parts_pqa[0] == "api" and parts_pqa[1] == "runs"
+                and parts_pqa[3] == "paper-qa" and parts_pqa[4] == "history"):
+            run_id = parts_pqa[2]
+            run = self.state.get_run(run_id)
+            if run is None:
+                self._send_json({"error": "Run not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            session_id = run.eureka_session_id or ""
+            import json as _json
+            history_file = settings.runs_dir / session_id / "paper_qa_history.jsonl"
+            messages = []
+            if history_file.exists():
+                for line in history_file.read_text(encoding="utf-8").strip().split("\n"):
+                    if line.strip():
+                        try:
+                            messages.append(_json.loads(line))
+                        except _json.JSONDecodeError:
+                            pass
+            self._send_json({"messages": messages})
+            return
+
         if parsed.path.startswith("/api/runs/"):
             run_id = parsed.path.split("/")[-1]
             run = self.state.get_run(run_id)
@@ -1803,6 +1826,81 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             result = _install_skill(skillname)
             status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
             self._send_json(result, status=status)
+            return
+
+        # ── Paper QA endpoints ────────────────────────────────────────────
+        parts_pqa = parsed.path.strip("/").split("/")
+        if (len(parts_pqa) == 5 and parts_pqa[0] == "api" and parts_pqa[1] == "runs"
+                and parts_pqa[3] == "paper-qa" and parts_pqa[4] == "ask"):
+            run_id = parts_pqa[2]
+            run = self.state.get_run(run_id)
+            if run is None:
+                self._send_json({"error": "Run not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            session_id = run.eureka_session_id
+            if not session_id:
+                self._send_json({"error": "No active session"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            payload = self._read_json()
+            question = str(payload.get("question", "")).strip()
+            history_list = payload.get("history", [])
+            if not question:
+                self._send_json({"error": "No question provided"}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            bus = getattr(run, "bus", None)
+            if bus is None:
+                session = _active_sessions.get(session_id)
+                bus = getattr(session, "bus", None) if session else None
+            latex = bus.get("paper_qa_latex") or "" if bus else ""
+
+            import asyncio as _asyncio
+            from eurekaclaw.agents.paper_qa.agent import PaperQAAgent
+            from eurekaclaw.tools.registry import build_default_registry
+            from eurekaclaw.skills.injector import SkillInjector
+            from eurekaclaw.skills.registry import SkillRegistry
+            from eurekaclaw.memory.manager import MemoryManager
+            from eurekaclaw.llm import create_client
+
+            tool_registry = build_default_registry(bus=bus) if bus else build_default_registry()
+            agent = PaperQAAgent(
+                bus=bus,
+                tool_registry=tool_registry,
+                skill_injector=SkillInjector(SkillRegistry()),
+                memory=MemoryManager(session_id=session_id),
+                client=create_client(),
+            )
+            clean_history = [
+                {"role": h.get("role", "user"), "content": h.get("content", "")}
+                for h in history_list
+            ]
+            try:
+                loop = _asyncio.new_event_loop()
+                result = loop.run_until_complete(
+                    agent.ask(question=question, latex=latex, history=clean_history)
+                )
+                loop.close()
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            if result.failed:
+                self._send_json({"error": result.error}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            import json as _json
+            from datetime import datetime as _dt, timezone as _tz
+            history_dir = settings.runs_dir / session_id
+            history_dir.mkdir(parents=True, exist_ok=True)
+            history_file = history_dir / "paper_qa_history.jsonl"
+            ts = _dt.now(_tz.utc).isoformat()
+            with history_file.open("a", encoding="utf-8") as f:
+                f.write(_json.dumps({"role": "user", "content": question, "ts": ts}, ensure_ascii=False) + "\n")
+                f.write(_json.dumps({"role": "assistant", "content": result.output.get("answer", ""), "ts": ts}, ensure_ascii=False) + "\n")
+
+            self._send_json({
+                "answer": result.output.get("answer", ""),
+                "tool_steps": [],
+            })
             return
 
         # Gate submission endpoints: /api/runs/<run_id>/gate/{survey|direction|theory}
