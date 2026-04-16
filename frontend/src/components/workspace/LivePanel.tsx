@@ -1,9 +1,49 @@
-import type { SessionRun } from '@/types';
+import type { SessionRun, PipelineTask } from '@/types';
 import { getActiveOuterStage } from '@/lib/statusHelpers';
-import { AGENT_MANIFEST } from '@/lib/agentManifest';
+import { AGENT_MANIFEST, STAGE_TASK_MAP } from '@/lib/agentManifest';
 import { agentNarrativeLine } from '@/lib/agentManifest';
 import { friendlyInnerStage } from '@/lib/statusHelpers';
-import { titleCase, escapeHtml, humanize } from '@/lib/formatters';
+import { titleCase, escapeHtml, humanize, formatLocalTimestamp, parseServerTimestamp } from '@/lib/formatters';
+
+function pipelineEventLabel(taskName: string, status: string, error?: string): string {
+  const role = STAGE_TASK_MAP[taskName] || taskName;
+  const manifest = AGENT_MANIFEST.find((a) => a.role === role);
+  const name = manifest?.name || titleCase(taskName);
+  if (status === 'completed') return `${name} completed`;
+  if (status === 'failed') return `${name} failed${error ? ': ' + error.slice(0, 80) : ''}`;
+  if (status === 'in_progress' || status === 'running') return `${name} running...`;
+  if (status === 'skipped') return `${name} skipped`;
+  return `${name} ${status}`;
+}
+
+function PipelineTimeline({ tasks, run }: { tasks: PipelineTask[]; run: SessionRun }) {
+  const events = tasks
+    .filter((t) => t.started_at || t.completed_at)
+    .map((t) => ({
+      time: t.completed_at || t.started_at || run.created_at,
+      label: pipelineEventLabel(t.name, t.status, t.error_message),
+      failed: t.status === 'failed',
+    }))
+    .sort((a, b) => {
+      const tA = parseServerTimestamp(a.time)?.getTime() ?? 0;
+      const tB = parseServerTimestamp(b.time)?.getTime() ?? 0;
+      return tA - tB;
+    });
+
+  if (!events.length) return null;
+
+  return (
+    <div className="pipeline-timeline">
+      {events.map((ev, i) => (
+        <div key={i} className={`pipeline-event${ev.failed ? ' pipeline-event--failed' : ''}`}>
+          <span className="pipeline-event-dot" />
+          <span className="pipeline-event-label">{ev.label}</span>
+          <span className="pipeline-event-time">{formatLocalTimestamp(ev.time)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 interface LivePanelProps {
   run: SessionRun | null;
@@ -25,6 +65,7 @@ export function LivePanel({ run }: LivePanelProps) {
   const pipeline = run.pipeline ?? [];
   const arts = run.artifacts ?? {};
   const activeOuter = getActiveOuterStage(pipeline);
+  const pipelineTimeline = <PipelineTimeline tasks={pipeline} run={run} />;
   const launchHtmlUrl = run.launch_html_url;
   const launchHtmlLink = launchHtmlUrl ? (
     <p className="live-html-link-row">
@@ -134,6 +175,7 @@ export function LivePanel({ run }: LivePanelProps) {
           {dir && <blockquote className="drawer-direction-quote">{dir}</blockquote>}
           {hypothesis && !dir && <blockquote className="drawer-direction-quote">{hypothesis}</blockquote>}
           <p className="drawer-muted">Switch to the <strong>Paper</strong> tab to read the draft, or <strong>Proof</strong> for the theorem sketch.</p>
+          {pipelineTimeline}
           {launchHtmlLink}
         </div>
       </div>
@@ -144,8 +186,9 @@ export function LivePanel({ run }: LivePanelProps) {
     return (
       <div className="live-activity-area">
         <div className="live-thinking-view">
-          <p className="live-stage-label" style={{ color: 'var(--red)' }}>✗ Session failed</p>
-          <p className="drawer-muted">{run.error || 'An error occurred. Check the Logs tab for details.'}</p>
+          <p className="live-stage-label" style={{ color: 'var(--warn)' }}>Session failed</p>
+          {run.error && <p className="drawer-muted">{run.error}</p>}
+          {pipelineTimeline}
           {launchHtmlLink}
         </div>
       </div>
