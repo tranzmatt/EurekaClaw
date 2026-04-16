@@ -114,7 +114,7 @@ def _load_valid_tokens() -> dict[str, Any] | None:
 # =============================================================================
 
 
-_OAUTH_API_KEY_SET = False  # Track whether we injected the API key via OAuth
+_OAUTH_INJECTED_KEY: str | None = None  # The exact token we injected via OAuth
 
 
 def setup_codex_env(access_token: str, account_id: str = "") -> None:
@@ -123,9 +123,9 @@ def setup_codex_env(access_token: str, account_id: str = "") -> None:
     The OpenAICompatAdapter reads ``OPENAI_COMPAT_API_KEY`` (and the base URL),
     so no code changes are needed in the adapter itself.
     """
-    global _OAUTH_API_KEY_SET  # noqa: PLW0603
+    global _OAUTH_INJECTED_KEY  # noqa: PLW0603
     os.environ["OPENAI_COMPAT_API_KEY"] = access_token
-    _OAUTH_API_KEY_SET = True
+    _OAUTH_INJECTED_KEY = access_token
     if account_id:
         os.environ["CODEX_ACCOUNT_ID"] = account_id
     else:
@@ -133,12 +133,20 @@ def setup_codex_env(access_token: str, account_id: str = "") -> None:
 
 
 def clear_oauth_env() -> None:
-    """Remove OAuth-injected env vars. Safe to call even if OAuth was never used."""
-    global _OAUTH_API_KEY_SET  # noqa: PLW0603
+    """Remove OAuth-injected env vars. Safe to call even if OAuth was never used.
+
+    Only clears OPENAI_COMPAT_API_KEY if the current value is the exact
+    token we injected — if the user has since overwritten it with their
+    own api_key credential, we leave it untouched.
+    """
+    global _OAUTH_INJECTED_KEY  # noqa: PLW0603
     os.environ.pop("CODEX_ACCOUNT_ID", None)
-    if _OAUTH_API_KEY_SET:
+    if (
+        _OAUTH_INJECTED_KEY is not None
+        and os.environ.get("OPENAI_COMPAT_API_KEY") == _OAUTH_INJECTED_KEY
+    ):
         os.environ.pop("OPENAI_COMPAT_API_KEY", None)
-        _OAUTH_API_KEY_SET = False
+    _OAUTH_INJECTED_KEY = None
 
 
 # =============================================================================
