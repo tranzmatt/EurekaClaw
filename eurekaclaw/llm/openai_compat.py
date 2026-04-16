@@ -50,7 +50,13 @@ class OpenAICompatAdapter(LLMClient):
                 "Install it with:  pip install openai"
             ) from exc
 
-        self._client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+        from eurekaclaw.config import settings
+
+        self._client = AsyncOpenAI(
+            base_url=base_url,
+            api_key=api_key,
+            timeout=float(settings.llm_http_timeout_seconds),
+        )
         self._default_model = default_model
 
     async def close(self) -> None:

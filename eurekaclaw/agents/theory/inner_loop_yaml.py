@@ -496,6 +496,14 @@ class TheoryInnerLoopYaml:
             start_stage = meta["next_stage"]
             current_spec = meta["current_spec"]
             original_spec = meta["original_spec"]
+            context_summary = str(meta.get("context_summary", "")).strip()
+            if context_summary:
+                domain = (
+                    domain
+                    + ("\n\n" if domain else "")
+                    + "[Checkpoint compact summary]\n"
+                    + context_summary
+                )
             self.bus.put_theory_state(saved_state)
             state = saved_state
             cp.clear_pause_flag()
