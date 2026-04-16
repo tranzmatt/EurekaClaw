@@ -75,6 +75,7 @@ class OpenAIResponsesAdapter(LLMClient):
             ) from exc
 
         import httpx
+        from eurekaclaw.config import settings
 
         self._client = httpx.AsyncClient(
             base_url=_CHATGPT_BACKEND,
@@ -83,7 +84,7 @@ class OpenAIResponsesAdapter(LLMClient):
                 "Content-Type": "application/json",
                 **({"ChatGPT-Account-Id": account_id} if account_id else {}),
             },
-            timeout=httpx.Timeout(180.0, connect=15.0),
+            timeout=httpx.Timeout(float(settings.llm_http_timeout_seconds), connect=15.0),
         )
         self._default_model = default_model or _DEFAULT_CODEX_MODEL
 

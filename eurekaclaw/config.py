@@ -82,6 +82,12 @@ class Config(BaseSettings):
 
     # ---- Token-efficiency knobs --------------------------------------------
     context_compress_after_turns: int = Field(default=6, alias="CONTEXT_COMPRESS_AFTER_TURNS")
+    context_compact_token_threshold: int = Field(
+        default=24_000, alias="CONTEXT_COMPACT_TOKEN_THRESHOLD"
+    )
+    context_preserve_tail_messages: int = Field(
+        default=6, alias="CONTEXT_PRESERVE_TAIL_MESSAGES"
+    )
     auto_verify_confidence: float = Field(default=0.95, alias="AUTO_VERIFY_CONFIDENCE")
     verifier_pass_confidence: float = Field(default=0.90, alias="VERIFIER_PASS_CONFIDENCE")
     stagnation_window: int = Field(default=3, alias="STAGNATION_WINDOW")
@@ -114,6 +120,7 @@ class Config(BaseSettings):
     llm_retry_attempts: int = Field(default=5, alias="LLM_RETRY_ATTEMPTS")
     llm_retry_wait_min: int = Field(default=4, alias="LLM_RETRY_WAIT_MIN")
     llm_retry_wait_max: int = Field(default=90, alias="LLM_RETRY_WAIT_MAX")
+    llm_http_timeout_seconds: int = Field(default=300, alias="LLM_HTTP_TIMEOUT_SECONDS")
 
     # ---- Proof quality ------------------------------------------------------
     # When True, writer enforces step-by-step proof rules and highlights

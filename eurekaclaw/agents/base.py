@@ -18,6 +18,15 @@ from eurekaclaw.types.tasks import Task
 
 logger = logging.getLogger(__name__)
 
+_TIMEOUT_FRAGMENTS = (
+    "timeout",
+    "timed out",
+    "deadline",
+    "readtimeout",
+    "read timeout",
+    "request timed out",
+)
+
 _COMPRESS_SYSTEM = (
     "You are a research assistant summarising the progress of an ongoing task. "
     "Produce a concise bullet-point summary (≤8 bullets) that captures: "
@@ -131,6 +140,8 @@ class BaseAgent(ABC):
         from eurekaclaw.config import settings
         _max_turns = max_turns if max_turns is not None else settings.theory_stage_max_turns
         compress_every = settings.context_compress_after_turns  # 0 = disabled
+        compact_token_threshold = settings.context_compact_token_threshold
+        preserve_tail = settings.context_preserve_tail_messages
 
         system = self.build_system_prompt(task)
         tools = self.tool_registry.definitions_for(self.get_tool_names())
@@ -144,24 +155,70 @@ class BaseAgent(ABC):
         for turn in range(_max_turns):
             # --- Periodic context compression ---
             if (
-                compress_every > 0
-                and turn > 0
-                and turn % compress_every == 0
-                and len(self.session) > compress_every
+                self.session.should_compact(
+                    max_messages=max(compress_every, 1),
+                    token_threshold=compact_token_threshold,
+                )
+                and (
+                    (
+                        compress_every > 0
+                        and turn > 0
+                        and turn % compress_every == 0
+                        and len(self.session) > compress_every
+                    )
+                    or self.session.estimated_tokens() >= compact_token_threshold
+                )
             ):
-                summary = await self._compress_history()
-                self.session.compress_to_summary(initial_user_message, summary)
+                summary = await self._compress_history(preserve_recent_messages=preserve_tail)
+                record = self.session.compress_to_summary(
+                    initial_user_message,
+                    summary,
+                    preserve_recent_messages=preserve_tail,
+                    reason="proactive",
+                )
                 logger.debug(
-                    "[%s] Context compressed at turn %d (session → 1 message)",
-                    self.role.value, turn,
+                    "[%s] Context compressed at turn %d (%d→%d est. tokens)",
+                    self.role.value,
+                    turn,
+                    record.estimated_tokens_before,
+                    record.estimated_tokens_after,
                 )
 
-            response = await self._call_model(
-                system=system,
-                messages=self.session.get_messages(),
-                tools=tools,
-                max_tokens=max_tokens,
-            )
+            try:
+                response = await self._call_model(
+                    system=system,
+                    messages=self.session.get_messages(),
+                    tools=tools,
+                    max_tokens=max_tokens,
+                )
+            except Exception as exc:
+                if (
+                    self._is_timeout_like(exc)
+                    and len(self.session) > 1
+                    and self.session.should_compact(
+                        max_messages=max(compress_every, 1),
+                        token_threshold=max(compact_token_threshold // 2, 1),
+                    )
+                ):
+                    logger.warning(
+                        "[%s] Timeout-like LLM failure after context growth; compacting and retrying once",
+                        self.role.value,
+                    )
+                    summary = await self._compress_history(preserve_recent_messages=preserve_tail)
+                    self.session.compress_to_summary(
+                        initial_user_message,
+                        summary,
+                        preserve_recent_messages=preserve_tail,
+                        reason="timeout-retry",
+                    )
+                    response = await self._call_model(
+                        system=system,
+                        messages=self.session.get_messages(),
+                        tools=tools,
+                        max_tokens=max_tokens,
+                    )
+                else:
+                    raise
 
             # Collect text content
             text_parts = []
@@ -228,13 +285,14 @@ class BaseAgent(ABC):
         }
         return final_text, total_tokens
 
-    async def _compress_history(self) -> str:
-        """Use the fast model to summarise the current conversation history."""
+    async def _compress_history(self, preserve_recent_messages: int = 6) -> str:
+        """Use the fast model to summarise older history while preserving a recent tail."""
         from eurekaclaw.config import settings
 
         msgs = self.session.get_messages()
+        summary_window = msgs[:-preserve_recent_messages] if len(msgs) > preserve_recent_messages else msgs
         lines: list[str] = []
-        for m in msgs[-12:]:
+        for m in summary_window:
             role = m["role"].upper()
             content = m["content"]
             if isinstance(content, list):
@@ -253,6 +311,13 @@ class BaseAgent(ABC):
             lines.append(f"{role}: {content_str}")
 
         history_text = "\n".join(lines)
+        if not history_text.strip():
+            return "Older context was compacted, but no material progress needed to be preserved."
+        if len(history_text) > 50_000:
+            history_text = (
+                "[earlier conversation truncated for compaction]\n"
+                + history_text[-50_000:]
+            )
         try:
             response = await self.client.messages.create(
                 model=settings.active_fast_model,
@@ -273,6 +338,11 @@ class BaseAgent(ABC):
             if not summaries:
                 return "No intermediate findings recorded yet. Continue working on the task."
             return "Previous findings: " + " | ".join(summaries[-3:])
+
+    @staticmethod
+    def _is_timeout_like(exc: Exception) -> bool:
+        err = str(exc).lower()
+        return any(fragment in err for fragment in _TIMEOUT_FRAGMENTS)
 
     async def _call_model(
         self,

@@ -80,13 +80,13 @@ def _read_codex_cli_tokens() -> dict[str, Any] | None:
 
 
 def _load_valid_tokens() -> dict[str, Any] | None:
-    """Return a valid access token, trying in order:
+    """Return a valid access token, preferring the Codex CLI's live credentials.
 
-    1. EurekaClaw's own credential store (``~/.eurekaclaw/credentials/openai-codex.json``)
-       — populated by ``eurekaclaw login --provider openai-codex``
-    2. The Codex CLI's credential file (``~/.codex/auth.json``)
-
-    Returns None if no credentials are found anywhere.
+    Order matters here: the official Codex CLI refreshes OAuth tokens in
+    ``~/.codex/auth.json`` when the user runs ``codex auth login`` again, while
+    EurekaClaw's own credential cache may lag behind. To avoid serving stale
+    tokens after a successful re-login, always prefer the CLI file first and
+    then refresh EurekaClaw's cache from it.
     """
     from eurekaclaw.auth.token_store import (
         is_token_expired,
@@ -94,17 +94,17 @@ def _load_valid_tokens() -> dict[str, Any] | None:
         save_tokens,
     )
 
-    # 1 — Try EurekaClaw's own store first
+    # 1 — Prefer the Codex CLI's current credential file.
+    codex_tokens = _read_codex_cli_tokens()
+    if codex_tokens:
+        # Refresh EurekaClaw's cache from the source of truth.
+        save_tokens(_PROVIDER, codex_tokens)
+        return codex_tokens
+
+    # 2 — Fall back to EurekaClaw's own store if the CLI file is unavailable.
     tokens = load_tokens(_PROVIDER)
     if tokens and not is_token_expired(tokens):
         return tokens
-
-    # 2 — Fall back to the Codex CLI's credential file
-    codex_tokens = _read_codex_cli_tokens()
-    if codex_tokens:
-        # Cache into EurekaClaw's store so future runs skip the file read
-        save_tokens(_PROVIDER, codex_tokens)
-        return codex_tokens
 
     return None
 
@@ -114,13 +114,15 @@ def _load_valid_tokens() -> dict[str, Any] | None:
 # =============================================================================
 
 
-def setup_codex_env(access_token: str) -> None:
+def setup_codex_env(access_token: str, account_id: str = "") -> None:
     """Inject the Codex access token into the environment.
 
     The OpenAICompatAdapter reads ``OPENAI_COMPAT_API_KEY`` (and the base URL),
     so no code changes are needed in the adapter itself.
     """
     os.environ["OPENAI_COMPAT_API_KEY"] = access_token
+    if account_id:
+        os.environ["CODEX_ACCOUNT_ID"] = account_id
 
 
 # =============================================================================
@@ -161,5 +163,5 @@ def maybe_setup_codex_auth() -> None:
             "Re-authenticate with the Codex CLI: codex auth login"
         )
 
-    setup_codex_env(access_token)
+    setup_codex_env(access_token, str(tokens.get("account_id", "")))
     logger.info("OpenAI Codex OAuth credentials loaded.")
