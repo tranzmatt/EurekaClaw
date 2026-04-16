@@ -51,7 +51,11 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(pdfUrl, { method: 'HEAD' });
+        // Use GET + AbortController instead of HEAD — the server
+        // only implements do_GET/do_POST, not do_HEAD.
+        const ctrl = new AbortController();
+        const res = await fetch(pdfUrl, { signal: ctrl.signal });
+        ctrl.abort(); // stop downloading the body
         if (!cancelled && res.ok) setPdfAvailable(true);
       } catch {
         // PDF not available — that's fine
