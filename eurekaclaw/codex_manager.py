@@ -123,6 +123,8 @@ def setup_codex_env(access_token: str, account_id: str = "") -> None:
     os.environ["OPENAI_COMPAT_API_KEY"] = access_token
     if account_id:
         os.environ["CODEX_ACCOUNT_ID"] = account_id
+    else:
+        os.environ.pop("CODEX_ACCOUNT_ID", None)
 
 
 # =============================================================================
