@@ -24,12 +24,14 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
   // Whether a PDF is available to display in the iframe.
   // Set true after successful compile or after HEAD-probing the artifact.
   const [pdfAvailable, setPdfAvailable] = useState(false);
+  const [autoCompileAttempted, setAutoCompileAttempted] = useState(false);
   const [prevVersion, setPrevVersion] = useState(paperVersion);
 
   // Reset PDF state when paper version changes (after rewrite).
   if (paperVersion !== prevVersion) {
     setPrevVersion(paperVersion);
     setPdfAvailable(false);
+    setAutoCompileAttempted(false);
     setCompileError('');
   }
 
@@ -37,17 +39,18 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
   const [wasRewriting, setWasRewriting] = useState(isRewriting);
   if (isRewriting && !wasRewriting) {
     setPdfAvailable(false);
+    setAutoCompileAttempted(false);
     setCompileError('');
   }
   if (isRewriting !== wasRewriting) {
     setWasRewriting(isRewriting);
   }
 
-  // On mount and when version changes, check if PDF exists. If not,
-  // auto-compile it so the user sees the PDF immediately.
+  // On mount and when version changes, probe for PDF. If missing,
+  // auto-compile once. The autoCompileAttempted flag prevents loops.
   const pdfUrl = `/api/runs/${run.run_id}/artifacts/paper.pdf`;
   useEffect(() => {
-    if (pdfAvailable || isRewriting || compiling) return;
+    if (pdfAvailable || isRewriting) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -57,38 +60,35 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
         if (cancelled) return;
         if (res.ok) {
           setPdfAvailable(true);
-        } else {
-          // PDF not found — auto-compile if LaTeX is available
-          const wt = run.pipeline?.find((t) => t.name === 'writer');
-          const hasLatex = !!(
-            (wt?.outputs?.latex_paper) || run.result?.latex_paper
+          return;
+        }
+        // PDF not found — auto-compile once
+        if (autoCompileAttempted) return;
+        setAutoCompileAttempted(true);
+        setCompiling(true);
+        try {
+          const compileRes = await apiPost<CompileResponse>(
+            `/api/runs/${run.run_id}/compile-pdf`, {}
           );
-          if (hasLatex) {
-            setCompiling(true);
-            try {
-              const compileRes = await apiPost<CompileResponse>(
-                `/api/runs/${run.run_id}/compile-pdf`, {}
-              );
-              if (!cancelled) {
-                if (compileRes.ok) {
-                  setPdfAvailable(true);
-                } else {
-                  setCompileError(compileRes.error || 'Compilation failed');
-                }
-              }
-            } catch (e) {
-              if (!cancelled) setCompileError(String(e));
-            } finally {
-              if (!cancelled) setCompiling(false);
+          if (!cancelled) {
+            if (compileRes.ok) {
+              setPdfAvailable(true);
+            } else {
+              setCompileError(compileRes.error || 'Compilation failed');
             }
           }
+        } catch (e) {
+          if (!cancelled) setCompileError(String(e));
+        } finally {
+          if (!cancelled) setCompiling(false);
         }
       } catch {
         // Network error — ignore
       }
     })();
     return () => { cancelled = true; };
-  }, [pdfUrl, paperVersion, isRewriting, pdfAvailable, compiling, run.run_id, run.pipeline, run.result]);
+  // Stable deps only — no run.pipeline/run.result objects
+  }, [pdfUrl, paperVersion, isRewriting, pdfAvailable, autoCompileAttempted, run.run_id]);
 
   // Source LaTeX from writer task outputs (available during gate) or fallback to run.result
   const writerTask = run.pipeline?.find((t) => t.name === 'writer');
