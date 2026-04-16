@@ -114,17 +114,31 @@ def _load_valid_tokens() -> dict[str, Any] | None:
 # =============================================================================
 
 
+_OAUTH_API_KEY_SET = False  # Track whether we injected the API key via OAuth
+
+
 def setup_codex_env(access_token: str, account_id: str = "") -> None:
     """Inject the Codex access token into the environment.
 
     The OpenAICompatAdapter reads ``OPENAI_COMPAT_API_KEY`` (and the base URL),
     so no code changes are needed in the adapter itself.
     """
+    global _OAUTH_API_KEY_SET  # noqa: PLW0603
     os.environ["OPENAI_COMPAT_API_KEY"] = access_token
+    _OAUTH_API_KEY_SET = True
     if account_id:
         os.environ["CODEX_ACCOUNT_ID"] = account_id
     else:
         os.environ.pop("CODEX_ACCOUNT_ID", None)
+
+
+def clear_oauth_env() -> None:
+    """Remove OAuth-injected env vars. Safe to call even if OAuth was never used."""
+    global _OAUTH_API_KEY_SET  # noqa: PLW0603
+    os.environ.pop("CODEX_ACCOUNT_ID", None)
+    if _OAUTH_API_KEY_SET:
+        os.environ.pop("OPENAI_COMPAT_API_KEY", None)
+        _OAUTH_API_KEY_SET = False
 
 
 # =============================================================================
@@ -146,10 +160,6 @@ def maybe_setup_codex_auth() -> None:
     from eurekaclaw.config import settings
 
     if settings.codex_auth_mode != "oauth":
-        # Clear all stale OAuth env vars from a previous session that
-        # used oauth mode in the same process.
-        os.environ.pop("CODEX_ACCOUNT_ID", None)
-        os.environ.pop("OPENAI_COMPAT_API_KEY", None)
         return
 
     tokens = _load_valid_tokens()
