@@ -54,8 +54,10 @@ def create_client(
     # The Chat Completions API rejects them with 429 "insufficient_quota"
     # and the standard Responses API rejects them with 401 "missing scopes".
     if original_backend == "codex" and settings.codex_auth_mode == "oauth":
+        from eurekaclaw.codex_manager import maybe_setup_codex_auth
         from eurekaclaw.llm.openai_responses import OpenAIResponsesAdapter
 
+        maybe_setup_codex_auth()
         api_key = (
             openai_api_key
             or os.environ.get("OPENAI_COMPAT_API_KEY")

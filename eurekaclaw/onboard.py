@@ -466,6 +466,14 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
             "  CONTEXT_COMPRESS_AFTER_TURNS",
             get("CONTEXT_COMPRESS_AFTER_TURNS", "6"),
         )
+        cfg["CONTEXT_COMPACT_TOKEN_THRESHOLD"] = ask(
+            "  CONTEXT_COMPACT_TOKEN_THRESHOLD",
+            get("CONTEXT_COMPACT_TOKEN_THRESHOLD", "24000"),
+        )
+        cfg["CONTEXT_PRESERVE_TAIL_MESSAGES"] = ask(
+            "  CONTEXT_PRESERVE_TAIL_MESSAGES",
+            get("CONTEXT_PRESERVE_TAIL_MESSAGES", "6"),
+        )
         cfg["SURVEY_MAX_TURNS"] = ask(
             "  SURVEY_MAX_TURNS", get("SURVEY_MAX_TURNS", "8")
         )
@@ -486,6 +494,9 @@ def run_onboard(non_interactive: bool, reset: bool, env_file: str) -> None:
         )
         cfg["LLM_RETRY_WAIT_MAX"] = ask(
             "  LLM_RETRY_WAIT_MAX", get("LLM_RETRY_WAIT_MAX", "90")
+        )
+        cfg["LLM_HTTP_TIMEOUT_SECONDS"] = ask(
+            "  LLM_HTTP_TIMEOUT_SECONDS", get("LLM_HTTP_TIMEOUT_SECONDS", "300")
         )
 
     # ── 5 / 5  Write .env ────────────────────────────────────────────────────

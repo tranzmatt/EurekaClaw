@@ -16,6 +16,36 @@ _PAUSE_FLAG = "pause.flag"
 _CHECKPOINT_FILE = "checkpoint.json"
 
 
+def _build_context_summary(
+    state: TheoryState,
+    *,
+    next_stage: str,
+    outer_iter: int,
+) -> str:
+    """Bounded compact summary stored alongside the raw checkpoint state."""
+    proven_ids = list(state.proven_lemmas.keys())
+    open_goals = list(state.open_goals)
+    failure_reasons = [f.failure_reason for f in state.failed_attempts[-5:]]
+    counterexamples = [c.counterexample_description for c in state.counterexamples[-3:]]
+    lines = [
+        f"Checkpoint resume summary:",
+        f"- next_stage: {next_stage}",
+        f"- outer_iteration: {outer_iter}",
+        f"- theorem_status: {state.status}",
+        f"- informal_statement: {state.informal_statement[:240] or '(none)'}",
+        f"- formal_statement: {state.formal_statement[:240] or '(none)'}",
+        f"- proven_lemmas: {len(proven_ids)} ({', '.join(proven_ids[-5:]) or 'none'})",
+        f"- open_goals: {len(open_goals)} ({', '.join(open_goals[:8]) or 'none'})",
+    ]
+    if failure_reasons:
+        lines.append("- recent_failures:")
+        lines.extend(f"  - {reason[:200]}" for reason in failure_reasons)
+    if counterexamples:
+        lines.append("- recent_counterexamples:")
+        lines.extend(f"  - {desc[:200]}" for desc in counterexamples)
+    return "\n".join(lines)
+
+
 class ProofPausedException(Exception):
     """Raised when a pause flag is detected mid-pipeline.
 
@@ -118,6 +148,11 @@ class ProofCheckpoint:
             "original_spec": original_spec,
             "domain": domain,
             "research_brief_json": research_brief_json,
+            "context_summary": _build_context_summary(
+                state,
+                next_stage=next_stage,
+                outer_iter=outer_iter,
+            ),
             "theory_state": json.loads(state.model_dump_json()),
         }
         self._checkpoint.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -132,7 +167,8 @@ class ProofCheckpoint:
         Returns:
             A ``(TheoryState, meta)`` tuple where *meta* contains:
             ``next_stage``, ``outer_iter``, ``current_spec``,
-            ``original_spec``, ``domain``, ``research_brief_json``.
+            ``original_spec``, ``domain``, ``research_brief_json``,
+            ``context_summary``.
 
         Raises:
             FileNotFoundError: if no checkpoint file exists.
@@ -156,6 +192,7 @@ class ProofCheckpoint:
             "original_spec": payload["original_spec"],
             "domain": payload.get("domain", ""),
             "research_brief_json": payload.get("research_brief_json", "{}"),
+            "context_summary": payload.get("context_summary", ""),
         }
         logger.info(
             "Checkpoint loaded: session=%s stage='%s' outer_iter=%d",
