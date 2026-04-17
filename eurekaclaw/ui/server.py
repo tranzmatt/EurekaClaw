@@ -38,6 +38,7 @@ from eurekaclaw.main import (
 )
 from eurekaclaw.skills.registry import SkillRegistry
 from eurekaclaw.types.tasks import InputSpec, ResearchOutput, TaskStatus
+from eurekaclaw.ui.constants import REWRITE_MARKER_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -1283,6 +1284,37 @@ def _bump_writer_paper_version(bus: "KnowledgeBus") -> int:
     return new_version
 
 
+def _sync_latex_to_disk(run) -> tuple[bool, str]:
+    """Sync writer bus latex → <run.output_dir>/paper.tex.
+
+    Returns (changed, latex). Writes paper.tex only if bus latex differs
+    from the on-disk copy. Never touches paper.pdf — callers that care
+    about stale PDFs are responsible for unlinking them.
+    """
+    if not getattr(run, "output_dir", None):
+        return False, ""
+    session = getattr(run, "eureka_session", None)
+    bus = getattr(session, "bus", None) if session else None
+    if bus is None:
+        return False, ""
+    pipeline = bus.get_pipeline()
+    if not pipeline:
+        return False, ""
+    writer = next((t for t in pipeline.tasks if t.name == "writer"), None)
+    if writer is None or not writer.outputs:
+        return False, ""
+    latex = writer.outputs.get("latex_paper", "")
+    if not latex:
+        return False, ""
+    tex_path = Path(run.output_dir) / "paper.tex"
+    tex_path.parent.mkdir(parents=True, exist_ok=True)
+    old = tex_path.read_text(encoding="utf-8") if tex_path.is_file() else ""
+    if latex != old:
+        tex_path.write_text(latex, encoding="utf-8")
+        return True, latex
+    return False, latex
+
+
 def _extract_latex_error(log_path: Path, max_chars: int = 1200) -> str:
     """Pull the relevant pdflatex error excerpt out of paper.log.
 
@@ -1628,24 +1660,9 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             # Sync the latest paper.tex from memory so .tex downloads
             # reflect any edits made since save_artifacts last ran.
             # Never touch paper.pdf here — compile-pdf owns the PDF
-            # lifecycle. Deleting the PDF from a GET handler races the
-            # iframe load and is what caused "Failed to load PDF
-            # document." after a successful compile.
+            # lifecycle.
             if _art_filename == "paper.tex":
-                _session = _art_run.eureka_session
-                _bus = _session.bus if _session else None
-                if _bus:
-                    _pipeline = _bus.get_pipeline()
-                    if _pipeline:
-                        _wt = next((t for t in _pipeline.tasks if t.name == "writer"), None)
-                        if _wt and _wt.outputs:
-                            _latex = _wt.outputs.get("latex_paper", "")
-                            if _latex:
-                                _tex = Path(_art_run.output_dir) / "paper.tex"
-                                _tex.parent.mkdir(parents=True, exist_ok=True)
-                                _old = _tex.read_text(encoding="utf-8") if _tex.is_file() else ""
-                                if _latex != _old:
-                                    _tex.write_text(_latex, encoding="utf-8")
+                _sync_latex_to_disk(_art_run)
             if not _art_path.is_file():
                 self._send_json({"error": "File not found"}, status=HTTPStatus.NOT_FOUND)
                 return
@@ -1889,24 +1906,12 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             # Always sync the latest LaTeX from the writer task's
             # in-memory output to disk. At gate time paper.tex may not
             # exist yet, and after a rewrite the on-disk copy is stale.
-            session = run.eureka_session
-            bus = session.bus if session else None
-            latex_mem = ""
-            if bus:
-                pipeline = bus.get_pipeline()
-                if pipeline:
-                    wt = next((t for t in pipeline.tasks if t.name == "writer"), None)
-                    if wt and wt.outputs:
-                        latex_mem = wt.outputs.get("latex_paper", "")
-            if latex_mem:
-                tex_path.parent.mkdir(parents=True, exist_ok=True)
-                old_tex = tex_path.read_text(encoding="utf-8") if tex_path.is_file() else ""
-                if latex_mem != old_tex:
-                    tex_path.write_text(latex_mem, encoding="utf-8")
-                    # Remove stale PDF so it gets freshly compiled
-                    stale_pdf = Path(run.output_dir) / "paper.pdf"
-                    if stale_pdf.is_file():
-                        stale_pdf.unlink()
+            changed, _ = _sync_latex_to_disk(run)
+            if changed:
+                # Remove stale PDF so it gets freshly compiled.
+                stale_pdf = Path(run.output_dir) / "paper.pdf"
+                if stale_pdf.is_file():
+                    stale_pdf.unlink()
             if not tex_path.is_file():
                 self._send_json({"error": "No paper.tex found"}, status=HTTPStatus.BAD_REQUEST)
                 return
@@ -2396,7 +2401,7 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             history_file = history_dir / "paper_qa_history.jsonl"
             entry = {
                 "role": "system",
-                "content": f'↻ Rewrite requested: "{prompt}"',
+                "content": f'{REWRITE_MARKER_PREFIX}"{prompt}"',
                 "ts": _dt.now(_tz.utc).isoformat(),
             }
             with history_file.open("a", encoding="utf-8") as f:

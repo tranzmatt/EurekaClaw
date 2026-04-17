@@ -25,6 +25,7 @@ from eurekaclaw.types.agents import AgentRole
 from eurekaclaw.agents.base import BaseAgent
 from eurekaclaw.types.artifacts import ResearchBrief
 from eurekaclaw.types.tasks import Task, TaskPipeline, TaskStatus
+from eurekaclaw.ui.constants import REWRITE_MARKER_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -186,7 +187,7 @@ class PaperQAHandler:
                     # that was never done.
                     marker = {
                         "role": "system",
-                        "content": f'↻ Rewrite requested: "{decision.question}"',
+                        "content": f'{REWRITE_MARKER_PREFIX}"{decision.question}"',
                         "ts": datetime.now(timezone.utc).isoformat(),
                         "version": self._paper_version,
                     }
@@ -576,7 +577,7 @@ class PaperQAHandler:
         Strips metadata (ts, version) and folds rewrite markers
         (role="system") into user turns. Anthropic's messages API
         rejects role="system" in the message list, but the marker
-        text ("↻ Rewrite requested: …") is real context the QA agent
+        text (REWRITE_MARKER_PREFIX + "…") is real context the QA agent
         needs when the user asks follow-ups like "did you address
         the issue from my earlier rewrite request?". This mirrors
         what the frontend QAChat does when posting to /paper-qa/ask.
@@ -596,7 +597,7 @@ class PaperQAHandler:
             return "(no prior discussion)"
         parts: list[str] = []
         for h in self._history:
-            # Skip system markers (e.g. "↻ Rewrite requested: …") —
+            # Skip system markers (role="system", e.g. REWRITE_MARKER_PREFIX entries) —
             # those are UI history artifacts, not QA conversation turns.
             if h["role"] not in ("user", "assistant"):
                 continue
