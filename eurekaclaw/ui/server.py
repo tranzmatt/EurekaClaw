@@ -542,8 +542,22 @@ class UIServerState:
         *,
         start_stage: str,
         theory_substage: str | None = None,
+        override_brief: Any | None = None,
+        override_bibliography: Any | None = None,
+        force_empty_bibliography: bool = False,
+        force_no_theory_state: bool = False,
     ) -> dict[str, Any]:
-        """Re-execute a run from a later stage using saved survey artifacts."""
+        """Re-execute a run from a later stage using saved survey artifacts.
+
+        ``override_brief`` / ``override_bibliography`` skip artifact loading
+        from disk and bus, forcing the restart to use the supplied values.
+        ``force_empty_bibliography`` drops any loaded bibliography so
+        downstream stages see an empty paper set (used when the user opted
+        to continue without papers after a stale survey gate).
+        ``force_no_theory_state`` discards any persisted theory state so an
+        earlier aborted theory attempt cannot leak into this restart (used
+        whenever we resume at a stage before theory).
+        """
         run = self.get_run(run_id)
         if run is None:
             return {"error": "Run not found"}
@@ -552,20 +566,30 @@ class UIServerState:
         if theory_substage is not None and theory_substage not in _THEORY_SUBSTAGES:
             return {"error": f"Unknown theory substage: {theory_substage}"}
 
-        brief = None
-        bibliography = None
+        brief = override_brief
+        bibliography = override_bibliography
         theory_state = None
-        if run.eureka_session is not None and run.eureka_session.bus is not None:
-            brief = run.eureka_session.bus.get_research_brief()
-            bibliography = run.eureka_session.bus.get_bibliography()
-            theory_state = run.eureka_session.bus.get_theory_state()
+        if brief is None or (bibliography is None and not force_empty_bibliography):
+            if run.eureka_session is not None and run.eureka_session.bus is not None:
+                if brief is None:
+                    brief = run.eureka_session.bus.get_research_brief()
+                if bibliography is None and not force_empty_bibliography:
+                    bibliography = run.eureka_session.bus.get_bibliography()
+                if not force_no_theory_state:
+                    theory_state = run.eureka_session.bus.get_theory_state()
 
-        if brief is None or bibliography is None:
+        if brief is None or (bibliography is None and not force_empty_bibliography):
             saved_brief, saved_bib = _load_saved_run_artifacts(run)
             brief = brief or saved_brief
-            bibliography = bibliography or saved_bib
-        if theory_state is None:
+            if not force_empty_bibliography:
+                bibliography = bibliography or saved_bib
+        if theory_state is None and not force_no_theory_state:
             theory_state = _load_saved_theory_state(run)
+
+        if force_empty_bibliography:
+            bibliography = None
+        if force_no_theory_state:
+            theory_state = None
 
         if brief is None:
             return {"error": "No saved survey artifacts found — rerun the full session instead"}
@@ -614,6 +638,68 @@ class UIServerState:
     def restart_from_ideation(self, run_id: str) -> dict[str, Any]:
         """Re-execute a run starting from ideation, reusing saved survey artifacts."""
         return self._restart_from_stage(run_id, start_stage="ideation")
+
+    def skip_survey_to_ideation(self, run_id: str) -> dict[str, Any]:
+        """Skip the survey stage and continue to ideation.
+
+        Called from the survey gate endpoint when the gate is no longer live
+        (the orchestrator thread is gone after a server restart or crash) and
+        the user clicked "Continue without papers". Always builds a fresh
+        research brief from the run's input_spec and forces an empty
+        bibliography — any artifacts lingering from prior reruns of this run
+        are discarded so ideation starts from a clean slate.
+        """
+        from eurekaclaw.types.artifacts import ResearchBrief
+
+        run = self.get_run(run_id)
+        if run is None:
+            return {"error": "Run not found"}
+
+        # The gate was reported stale by submit_survey → treat any lingering
+        # "running"/"queued" status as an interrupted run so restart proceeds.
+        if run.status in ("running", "queued", "pausing", "resuming"):
+            run.status = "failed"
+            run.error = run.error or "Session interrupted before ideation."
+            run.error_category = run.error_category or "retryable"
+            run.updated_at = datetime.utcnow()
+            self._persist_run(run)
+
+        # Purge any stale bibliography / theory state persisted from a prior
+        # attempt so ideation starts from a clean slate (matches the user's
+        # "Continue without papers" intent and prevents an earlier theory
+        # attempt from bleeding into this fresh restart).
+        if run.output_dir:
+            out_dir = Path(run.output_dir)
+            for stale_name in ("bibliography.json", "theory_state.json"):
+                try:
+                    out_dir.joinpath(stale_name).unlink(missing_ok=True)
+                except Exception:
+                    logger.warning(
+                        "Failed to clear stale %s in %s",
+                        stale_name,
+                        run.output_dir,
+                        exc_info=True,
+                    )
+
+        spec = run.input_spec
+        fresh_brief = ResearchBrief(
+            session_id=run.eureka_session_id or run.run_id,
+            input_mode=spec.mode,
+            domain=spec.domain,
+            query=spec.query or spec.conjecture or spec.domain,
+            conjecture=spec.conjecture,
+            selected_skills=spec.selected_skills,
+            reference_paper_ids=spec.paper_ids,
+        )
+
+        return self._restart_from_stage(
+            run_id,
+            start_stage="ideation",
+            override_brief=fresh_brief,
+            override_bibliography=None,
+            force_empty_bibliography=True,
+            force_no_theory_state=True,
+        )
 
     def restart_from_theory(self, run_id: str) -> dict[str, Any]:
         """Re-execute a run starting from theory, reusing saved ideation artifacts."""
@@ -2137,6 +2223,21 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 raw_ids = payload.get("paper_ids", [])
                 paper_ids = [str(x).strip() for x in raw_ids if str(x).strip()]
                 ok = _rg.submit_survey(session_id, paper_ids)
+                if not ok:
+                    # Stale gate (server restart / orchestrator already gone).
+                    # "Continue without papers" → skip survey, restart from ideation.
+                    if not paper_ids:
+                        recovery = self.state.skip_survey_to_ideation(run_id)
+                        if "error" in recovery:
+                            self._send_json(recovery, status=HTTPStatus.BAD_REQUEST)
+                        else:
+                            self._send_json({"ok": True, "skipped": "survey"})
+                        return
+                    self._send_json(
+                        {"error": "Gate no longer active — restart the session to retry with these papers."},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
             elif gate_type == "direction":
                 direction = str(payload.get("direction", "")).strip()
                 ok = _rg.submit_direction(session_id, direction)
@@ -2157,7 +2258,10 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             if ok:
                 self._send_json({"ok": True})
             else:
-                self._send_json({"error": "Gate not active for this session"}, status=HTTPStatus.BAD_REQUEST)
+                self._send_json(
+                    {"error": "Gate no longer active — this session was interrupted. Restart to continue."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
             return
 
         self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
