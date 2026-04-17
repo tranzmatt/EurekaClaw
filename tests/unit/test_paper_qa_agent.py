@@ -1,10 +1,9 @@
 """Unit tests for enhanced PaperQAAgent with multi-turn and tool support."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from eurekaclaw.agents.paper_qa.agent import PaperQAAgent
-from eurekaclaw.knowledge_bus.bus import KnowledgeBus
 from eurekaclaw.tools.registry import ToolRegistry
 from eurekaclaw.skills.injector import SkillInjector
 from eurekaclaw.skills.registry import SkillRegistry

@@ -204,9 +204,7 @@ export function PaperPanel({ run }: PaperPanelProps) {
         />
       </div>
 
-      <div className="review-divider">
-        <div className="review-divider-handle" />
-      </div>
+      <div className="review-divider review-divider-static" aria-hidden="true" />
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex' }}>
         <QAChat

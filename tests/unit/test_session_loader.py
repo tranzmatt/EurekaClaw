@@ -2,7 +2,6 @@
 
 import json
 import pytest
-from pathlib import Path
 
 from eurekaclaw.orchestrator.session_loader import SessionLoader
 

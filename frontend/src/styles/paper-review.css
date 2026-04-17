@@ -195,6 +195,19 @@
   background: var(--primary);
 }
 
+.review-divider-static {
+  cursor: default;
+  background: var(--line);
+}
+
+.review-divider-static:hover {
+  background: var(--line);
+}
+
+.review-divider-static::after {
+  content: none;
+}
+
 .review-divider-handle {
   width: 2px;
   height: 28px;

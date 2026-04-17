@@ -2076,13 +2076,15 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
 
                 # Re-run theory + writer with the user's revision feedback.
                 loop = _asyncio.new_event_loop()
-                new_latex = loop.run_until_complete(
-                    handler._do_rewrite(
-                        pipeline, brief,
-                        revision_prompt=revision_prompt,
+                try:
+                    new_latex = loop.run_until_complete(
+                        handler._do_rewrite(
+                            pipeline, brief,
+                            revision_prompt=revision_prompt,
+                        )
                     )
-                )
-                loop.close()
+                finally:
+                    loop.close()
 
                 if new_latex:
                     bus.persist(session_dir)
@@ -2181,15 +2183,16 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 {"role": h.get("role", "user"), "content": h.get("content", "")}
                 for h in history_list
             ]
+            loop = _asyncio.new_event_loop()
             try:
-                loop = _asyncio.new_event_loop()
                 result = loop.run_until_complete(
                     agent.ask(question=question, latex=latex, history=clean_history)
                 )
-                loop.close()
             except Exception as e:
                 self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
+            finally:
+                loop.close()
             if result.failed:
                 self._send_json({"error": result.error}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
                 return
