@@ -6089,6 +6089,17 @@ textarea {
   line-height: 1.5;
 }
 
+.gate-overlay-error {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(192, 57, 43, 0.06);
+  border: 1px solid rgba(192, 57, 43, 0.18);
+  color: #8b2d26;
+  font-size: 0.80rem;
+  line-height: 1.45;
+}
+
 /* ── Theory review: feedback section ── */
 .theory-feedback-section {
   margin-top: 8px;

@@ -69,7 +69,7 @@ export function PaperReviewPanel({ run }: PaperReviewPanelProps) {
     try {
       await apiPost(`/api/runs/${run.run_id}/gate/paper_qa`, { action: 'no', question: '' });
     } catch (e) {
-      console.error('Failed to accept paper:', e);
+      alert(`Could not accept paper: ${(e as Error).message}`);
     }
   }, [run.run_id, isHistorical, setReviewSessionId]);
 
@@ -88,9 +88,9 @@ export function PaperReviewPanel({ run }: PaperReviewPanelProps) {
         await apiPost(`/api/runs/${run.run_id}/gate/paper_qa`, { action: 'rewrite', question: prompt });
       }
     } catch (e) {
-      console.error('Failed to trigger rewrite:', e);
+      alert(`Could not trigger rewrite: ${(e as Error).message}`);
     }
-  }, [run.run_id, isHistorical]);
+  }, [run.run_id, isHistorical, setMessages]);
 
   // Resizable divider drag handling
   const handleMouseDown = useCallback(() => {
