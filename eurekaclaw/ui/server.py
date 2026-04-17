@@ -1382,6 +1382,36 @@ def _mark_rewrite_tasks_failed(pipeline, bus) -> None:
         bus.put_pipeline(pipeline)
 
 
+_REWRITE_CLAIM_LOCK = threading.Lock()
+_REWRITE_CLAIM_SESSIONS: set[str] = set()
+
+
+def _claim_rewrite_slot(session_id: str) -> bool:
+    """Claim a per-session rewrite slot. Returns True iff claim succeeded.
+
+    The /rewrite handler's status-based guard is not atomic with thread
+    spawn — two requests can both see all-COMPLETED tasks in the window
+    before _do_rewrite flips anything to IN_PROGRESS. This lock closes
+    that window: a second /rewrite for the same session is refused until
+    the first bg thread releases its slot.
+    """
+    if not session_id:
+        return False
+    with _REWRITE_CLAIM_LOCK:
+        if session_id in _REWRITE_CLAIM_SESSIONS:
+            return False
+        _REWRITE_CLAIM_SESSIONS.add(session_id)
+        return True
+
+
+def _release_rewrite_slot(session_id: str) -> None:
+    """Release a claim made by _claim_rewrite_slot. No-op if not held."""
+    if not session_id:
+        return
+    with _REWRITE_CLAIM_LOCK:
+        _REWRITE_CLAIM_SESSIONS.discard(session_id)
+
+
 def _handle_stale_paper_qa_gate(pipeline, bus, session_id: str) -> None:
     """Flip a stale AWAITING_GATE paper_qa_gate task to FAILED and persist.
 
@@ -1497,6 +1527,8 @@ def _run_rewrite_bg(run, bus, pipeline, brief, prompt: str, rewrite_id: str) -> 
                 "Could not persist bus after rewrite failure for %s", session_id
             )
         _append_paper_qa_error_marker(session_id, f"Rewrite failed: {e}")
+    finally:
+        _release_rewrite_slot(session_id)
 
 
 def _extract_latex_error(log_path: Path, max_chars: int = 1200) -> str:
@@ -2302,13 +2334,28 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 _handle_stale_paper_qa_gate(pipeline, bus, run.eureka_session_id)
 
             # Background path: orchestrator is idle/completed. Spawn a thread.
+            # Claim the per-session slot BEFORE starting the thread so a
+            # racing second request can't slip past the status-based guard
+            # in the window before _do_rewrite flips tasks to IN_PROGRESS.
+            if not _claim_rewrite_slot(run.eureka_session_id):
+                self._send_json(
+                    {"error": "A rewrite is already in progress"},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
             rewrite_id = str(uuid.uuid4())
             thread = threading.Thread(
                 target=_run_rewrite_bg,
                 args=(run, bus, pipeline, brief, prompt, rewrite_id),
                 daemon=True,
             )
-            thread.start()
+            try:
+                thread.start()
+            except Exception:
+                # Release the slot if we failed to start the thread at all —
+                # otherwise the session is permanently blocked.
+                _release_rewrite_slot(run.eureka_session_id)
+                raise
             self._send_json(
                 {"ok": True, "mode": "bg", "rewrite_id": rewrite_id},
                 status=HTTPStatus.ACCEPTED,

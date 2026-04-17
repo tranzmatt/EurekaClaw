@@ -260,6 +260,112 @@ def test_run_rewrite_bg_happy_path_bumps_version_and_appends_marker(run_with_bus
     assert "tighten Section 3" in history_file.read_text(encoding="utf-8")
 
 
+def test_claim_rewrite_slot_returns_false_on_second_call():
+    """Concurrency guard: while one /rewrite bg thread is in flight for
+    session X, a second /rewrite for session X must be refused.
+
+    The status-based guard in the handler alone is insufficient — there is
+    a small window between thread.start() and _do_rewrite flipping tasks
+    to IN_PROGRESS where both requests would see all-COMPLETED tasks and
+    both would spawn bg threads, racing on the same pipeline.
+    """
+    from eurekaclaw.ui.server import _claim_rewrite_slot, _release_rewrite_slot
+
+    sid = "race-test-claim-1"
+    try:
+        assert _claim_rewrite_slot(sid) is True
+        assert _claim_rewrite_slot(sid) is False
+    finally:
+        _release_rewrite_slot(sid)
+
+    # After release, a fresh claim must succeed again.
+    try:
+        assert _claim_rewrite_slot(sid) is True
+    finally:
+        _release_rewrite_slot(sid)
+
+
+def test_claim_rewrite_slot_is_per_session():
+    """Claims must not cross-block unrelated sessions."""
+    from eurekaclaw.ui.server import _claim_rewrite_slot, _release_rewrite_slot
+
+    try:
+        assert _claim_rewrite_slot("race-sess-A") is True
+        assert _claim_rewrite_slot("race-sess-B") is True
+    finally:
+        _release_rewrite_slot("race-sess-A")
+        _release_rewrite_slot("race-sess-B")
+
+
+def test_claim_rewrite_slot_rejects_empty_session_id():
+    """Empty/None session ids must not be claimable (defensive guard)."""
+    from eurekaclaw.ui.server import _claim_rewrite_slot
+
+    assert _claim_rewrite_slot("") is False
+
+
+def test_run_rewrite_bg_releases_slot_on_success(run_with_bus, monkeypatch):
+    """Successful bg rewrite must release the claim so a follow-up /rewrite
+    can be accepted once the rewrite completes."""
+    from eurekaclaw.ui import server as srv
+
+    run, bus, _runs_dir = run_with_bus
+    pipeline = bus.get_pipeline()
+    brief = bus.get_research_brief()
+
+    async def _fake_do_rewrite(self, pipe, br, revision_prompt=None, writer_only=False):
+        return r"\section{x} v2"
+
+    monkeypatch.setattr(
+        "eurekaclaw.orchestrator.paper_qa_handler.PaperQAHandler._do_rewrite",
+        _fake_do_rewrite,
+    )
+    fake_orch = MagicMock()
+    for attr in ("agents", "router", "client", "tool_registry",
+                 "skill_injector", "memory", "gate"):
+        setattr(fake_orch, attr, MagicMock() if attr != "agents" else {})
+    monkeypatch.setattr(srv, "MetaOrchestrator", MagicMock(return_value=fake_orch))
+    monkeypatch.setattr(srv, "create_client", MagicMock())
+
+    # Pre-claim the slot so we can verify the bg thread releases it.
+    srv._claim_rewrite_slot(run.eureka_session_id)
+    srv._run_rewrite_bg(run, bus, pipeline, brief, "tighten", "rw-rel-1")
+
+    # After the bg thread exits, claim must be available again.
+    assert srv._claim_rewrite_slot(run.eureka_session_id) is True
+    srv._release_rewrite_slot(run.eureka_session_id)
+
+
+def test_run_rewrite_bg_releases_slot_on_failure(run_with_bus, monkeypatch):
+    """Failed bg rewrite must still release the claim (finally-path)."""
+    from eurekaclaw.ui import server as srv
+
+    run, bus, _runs_dir = run_with_bus
+    pipeline = bus.get_pipeline()
+    brief = bus.get_research_brief()
+
+    async def _boom(self, pipe, br, revision_prompt=None, writer_only=False):
+        raise RuntimeError("simulated crash")
+
+    monkeypatch.setattr(
+        "eurekaclaw.orchestrator.paper_qa_handler.PaperQAHandler._do_rewrite",
+        _boom,
+    )
+    fake_orch = MagicMock()
+    for attr in ("agents", "router", "client", "tool_registry",
+                 "skill_injector", "memory", "gate"):
+        setattr(fake_orch, attr, MagicMock() if attr != "agents" else {})
+    monkeypatch.setattr(srv, "MetaOrchestrator", MagicMock(return_value=fake_orch))
+    monkeypatch.setattr(srv, "create_client", MagicMock())
+
+    srv._claim_rewrite_slot(run.eureka_session_id)
+    srv._run_rewrite_bg(run, bus, pipeline, brief, "tighten", "rw-rel-2")
+
+    # Even after failure, the slot must be released.
+    assert srv._claim_rewrite_slot(run.eureka_session_id) is True
+    srv._release_rewrite_slot(run.eureka_session_id)
+
+
 def test_run_rewrite_bg_catches_exceptions_and_marks_failed(run_with_bus, monkeypatch):
     from eurekaclaw.ui import server as srv
 
