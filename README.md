@@ -52,10 +52,12 @@ $ eurekaclaw prove "Find recent papers on sparse attention + prove efficiency bo
 | 💡 | **Idea Generator** | Brainstorm novel hypotheses by synthesizing patterns across thousands of papers |
 | 🔢 | **Theorem Prover** | Generate, verify, and formalize proofs via a 7-stage bottom-up pipeline |
 | 📄 | **Paper Writer** | Draft camera-ready LaTeX papers with theorem environments and citations |
+| 💬 | **Paper QA Gate** | Review generated papers, ask multi-turn questions, and request revisions with inline PDF preview |
 | 🖥️ | **Runs Locally** | Compatible with Every Major Model API — Privacy by Design |
 | 🧠 | **Continual Learning** | Distills proof strategies into skills after every session, improving over time |
-| 🧪 | **Experiment Runner** *(under development)* | Numerically validates theoretical bounds; flags low-confidence lemmas |
-| 🌐 | **Browser UI** | React + TypeScript interface — live agent track, proof sketch, pause/resume, skills manager |
+| 🧪 | **Experiment Runner** | Numerically validates theoretical bounds; flags low-confidence lemmas |
+| 📋 | **Session History** | Revisit completed sessions — review papers, ask questions, and revise any past work |
+| 🌐 | **Browser UI** | Split-view paper review with PDF/LaTeX preview and QA chat, live pipeline track, proof sketch |
 
 ---
 
@@ -263,8 +265,8 @@ eurekaclaw onboard            # interactive setup wizard (creates .env)
 
 eurekaclaw install-skills     # install built-in proof skills (do once)
 
-# Browser UI — build frontend and open in browser
-make open
+# Browser UI (recommended) — split-view paper review with QA chat
+eurekaclaw ui --open-browser
 
 # CLI — prove a conjecture
 eurekaclaw prove "The sample complexity of transformers is O(L·d·log(d)/ε²)" \
@@ -276,8 +278,11 @@ eurekaclaw explore "multi-armed bandit theory"
 # CLI — start from arXiv papers
 eurekaclaw from-papers 1706.03762 2005.14165 --domain "attention mechanisms"
 
-# Browser UI - recommended
-eurekaclaw ui --open-browser
+# CLI — review a completed session (ask questions, request revisions)
+eurekaclaw review <session-id>
+
+# CLI — list all past sessions
+eurekaclaw sessions
 ```
 
 > No API key? Use a Claude Pro/Max subscription via [OAuth](https://eurekaclaw.github.io/getting-started/authentication.html#option-b-claude-pro-max-via-oauth).
@@ -302,6 +307,39 @@ eurekaclaw ui --open-browser
 
 ---
 
+## Paper Review & QA
+
+After the pipeline generates a paper, EurekaClaw provides an interactive review experience in both CLI and UI:
+
+**Browser UI** — The Paper tab shows a split-view with PDF/LaTeX preview on the left and a QA chat on the right. PDFs are auto-compiled. Ask questions about any section, and the QA agent answers using arXiv search, web search, and targeted LaTeX section reading. Click **Revise Paper** to re-run the theory and writer agents with your feedback.
+
+**CLI** — After paper generation, you're prompted to review:
+
+```bash
+Review the paper? [y/N]: y
+
+Question (Enter to accept): The bound in Theorem 2 seems loose
+⏳ QA Agent thinking...
+  ✓ tool: arxiv_search("spectral gap tight bound")
+  ✓ tool: latex_section_read(section="Theorem 2")
+
+The bound O(n²) follows from Weyl's inequality...
+
+What next?  [a]ccept  [q]uestion  [r]ewrite
+→ r
+
+Describe what to fix:
+→ Tighten bound using Cauchy interlacing for k-regular graphs
+
+Re-running theory + writer with feedback...
+✓ Done: theory
+✓ Done: writer
+```
+
+**Historical sessions** — Review any past session with `eurekaclaw review <session-id>` or click any completed session in the UI. The same QA and revision capabilities are available.
+
+---
+
 ## Documentation
 
 See detailed documentation in https://eurekaclaw.github.io/ .
@@ -313,7 +351,7 @@ See detailed documentation in https://eurekaclaw.github.io/ .
 | 🏗️ [**Architecture**](https://eurekaclaw.github.io/reference/architecture.html) | Pipeline stages, data flow, component design |
 | 🤖 [**Agents**](https://eurekaclaw.github.io/reference/agents.html) | Each agent's role, inputs, outputs, and tool usage |
 | 🔧 [**Tools**](https://eurekaclaw.github.io/reference/tools.html) | arXiv, Semantic Scholar, Lean4, WolframAlpha, code execution |
-| 💻 [**CLI Reference**](https://eurekaclaw.github.io/reference/cli.html) | All commands and options |
+| 💻 [**CLI Reference**](https://eurekaclaw.github.io/reference/cli.html) | All commands: prove, explore, from-papers, review, sessions, pause, resume |
 | 🐍 [**Python API**](https://eurekaclaw.github.io/reference/api.html) | `EurekaSession`, `KnowledgeBus`, data models |
 | 🧠 [**Memory System**](https://eurekaclaw.github.io/reference/memory.html) | Episodic, persistent, and knowledge graph tiers |
 | ✨ [**Skills**](https://eurekaclaw.github.io/reference/skills.html) | Skill registry, injection, distillation, writing custom skills |
@@ -337,6 +375,9 @@ cp .env.example .env
 | `OUTPUT_FORMAT` | `latex` | `latex` or `markdown` |
 | `EXPERIMENT_MODE` | `auto` | `auto` · `true` · `false` |
 | `THEORY_MAX_ITERATIONS` | `10` | Max proof loop iterations |
+| `CONTEXT_COMPACT_TOKEN_THRESHOLD` | `24000` | Token count that triggers automatic context compaction |
+| `CONTEXT_PRESERVE_TAIL_MESSAGES` | `6` | Recent messages preserved during compaction |
+| `LLM_HTTP_TIMEOUT_SECONDS` | `300` | HTTP timeout for LLM API calls |
 
 Full reference → [configuration.md](https://eurekaclaw.github.io/reference/configuration.html)
 
