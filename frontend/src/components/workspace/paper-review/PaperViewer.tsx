@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiPost } from '@/api/client';
 import { RewriteOverlay } from './RewriteOverlay';
 import type { SessionRun } from '@/types';
@@ -24,7 +24,10 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
   // Whether a PDF is available to display in the iframe.
   const [pdfAvailable, setPdfAvailable] = useState(false);
   const [pdfCacheBuster, setPdfCacheBuster] = useState(0);
-  const [autoCompileAttempted, setAutoCompileAttempted] = useState(false);
+  // Using a ref (not state) avoids re-triggering the compile effect just
+  // because we marked the attempt — which would cancel our own in-flight
+  // request and strand `compiling` at true forever.
+  const attemptedRef = useRef(false);
   const [prevVersion, setPrevVersion] = useState(paperVersion);
 
   // Note: session switches are handled by key={run.run_id} on the
@@ -34,7 +37,7 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
   if (paperVersion !== prevVersion) {
     setPrevVersion(paperVersion);
     setPdfAvailable(false);
-    setAutoCompileAttempted(false);
+    attemptedRef.current = false;
     setCompileError('');
   }
 
@@ -42,7 +45,7 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
   const [wasRewriting, setWasRewriting] = useState(isRewriting);
   if (isRewriting && !wasRewriting) {
     setPdfAvailable(false);
-    setAutoCompileAttempted(false);
+    attemptedRef.current = false;
     setCompileError('');
   }
   if (isRewriting !== wasRewriting) {
@@ -53,33 +56,32 @@ export function PaperViewer({ run, paperVersion, isRewriting, theoryStatus, writ
   // idempotent — if the PDF already exists and LaTeX hasn't changed,
   // it returns immediately. No separate probe needed (probing the
   // artifact endpoint has side effects that can delete valid PDFs).
+  // The attemptedRef guard prevents double-compile (including React
+  // StrictMode's double-invoke); no in-flight cancellation flag is
+  // needed because the parent remounts on session change via key prop.
   const pdfUrl = `/api/runs/${run.run_id}/artifacts/paper.pdf`;
   useEffect(() => {
-    if (pdfAvailable || isRewriting || autoCompileAttempted) return;
-    setAutoCompileAttempted(true);
+    if (pdfAvailable || isRewriting || attemptedRef.current) return;
+    attemptedRef.current = true;
     setCompiling(true);
-    let cancelled = false;
     void (async () => {
       try {
         const res = await apiPost<CompileResponse>(
           `/api/runs/${run.run_id}/compile-pdf`, {}
         );
-        if (!cancelled) {
-          if (res.ok) {
-            setPdfAvailable(true);
-            setPdfCacheBuster(Date.now());
-          } else {
-            setCompileError(res.error || 'Compilation failed');
-          }
+        if (res.ok) {
+          setPdfAvailable(true);
+          setPdfCacheBuster(Date.now());
+        } else {
+          setCompileError(res.error || 'Compilation failed');
         }
       } catch (e) {
-        if (!cancelled) setCompileError(String(e));
+        setCompileError(String(e));
       } finally {
-        if (!cancelled) setCompiling(false);
+        setCompiling(false);
       }
     })();
-    return () => { cancelled = true; };
-  }, [pdfAvailable, isRewriting, autoCompileAttempted, run.run_id]);
+  }, [pdfAvailable, isRewriting, run.run_id]);
 
   // Source LaTeX from writer task outputs (available during gate) or fallback to run.result
   const writerTask = run.pipeline?.find((t) => t.name === 'writer');
