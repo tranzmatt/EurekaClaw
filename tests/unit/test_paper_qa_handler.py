@@ -180,3 +180,103 @@ async def test_gate_rewrite_failure_does_not_bump_paper_version(
     await handler.run(pipeline, brief)
 
     assert writer_task.outputs["paper_version"] == 3
+
+
+@pytest.mark.asyncio
+async def test_do_rewrite_includes_experiment_in_task_list(handler_setup, monkeypatch):
+    """_do_rewrite must replay ['theory', 'experiment', 'writer'] when not writer_only."""
+    handler, pipeline, brief = handler_setup
+
+    # Add theory + experiment tasks alongside the existing writer.
+    from eurekaclaw.types.tasks import Task, TaskStatus
+    theory_task = Task(
+        task_id="t1", name="theory", agent_role="theory",
+        description="Prove theorem",
+        status=TaskStatus.COMPLETED,
+        outputs={"proof": "Q.E.D."},
+    )
+    experiment_task = Task(
+        task_id="e1", name="experiment", agent_role="experiment",
+        description="Run experiment",
+        status=TaskStatus.COMPLETED,
+        outputs={"metrics": {"acc": 0.9}},
+    )
+    pipeline.tasks = [theory_task, experiment_task] + pipeline.tasks
+
+    executed_names = []
+
+    class _FakeResult:
+        def __init__(self, name):
+            self.failed = False
+            self.output = {f"{name}_done": True}
+            self.text_summary = ""
+            self.error = ""
+
+    async def _fake_execute(task):
+        executed_names.append(task.name)
+        return _FakeResult(task.name)
+
+    fake_agent = MagicMock()
+    fake_agent.execute = AsyncMock(side_effect=_fake_execute)
+    handler.router.resolve = MagicMock(return_value=fake_agent)
+
+    # Stub out context helpers that write to disk.
+    monkeypatch.setattr(handler, "_save_rewrite_context", lambda *_a, **_kw: None)
+    monkeypatch.setattr(handler, "_summarize_qa_history", lambda: "")
+
+    result = await handler._do_rewrite(pipeline, brief, revision_prompt="tighten proof")
+
+    assert result is not None
+    assert executed_names == ["theory", "experiment", "writer"]
+
+
+@pytest.mark.asyncio
+async def test_do_rewrite_restores_experiment_outputs_on_failure(handler_setup, monkeypatch):
+    """When the writer step fails after experiment rewrote, experiment must
+    be restored to COMPLETED with its previous outputs, not left PENDING."""
+    handler, pipeline, brief = handler_setup
+
+    from eurekaclaw.types.tasks import Task, TaskStatus
+    theory_task = Task(
+        task_id="t1", name="theory", agent_role="theory",
+        description="Prove", status=TaskStatus.COMPLETED,
+        outputs={"proof": "original"},
+    )
+    experiment_task = Task(
+        task_id="e1", name="experiment", agent_role="experiment",
+        description="Run", status=TaskStatus.COMPLETED,
+        outputs={"metrics": {"acc": 0.9}},
+    )
+    pipeline.tasks = [theory_task, experiment_task] + pipeline.tasks
+
+    class _OkResult:
+        def __init__(self, name):
+            self.failed = False
+            self.output = {f"new_{name}": True}
+            self.text_summary = ""
+            self.error = ""
+
+    class _FailResult:
+        failed = True
+        output = {}
+        text_summary = ""
+        error = "writer boom"
+
+    async def _fake_execute(task):
+        if task.name == "writer":
+            return _FailResult()
+        return _OkResult(task.name)
+
+    fake_agent = MagicMock()
+    fake_agent.execute = AsyncMock(side_effect=_fake_execute)
+    handler.router.resolve = MagicMock(return_value=fake_agent)
+    monkeypatch.setattr(handler, "_save_rewrite_context", lambda *_a, **_kw: None)
+    monkeypatch.setattr(handler, "_summarize_qa_history", lambda: "")
+
+    result = await handler._do_rewrite(pipeline, brief, revision_prompt="tighten")
+
+    assert result is None
+    assert experiment_task.status == TaskStatus.COMPLETED
+    assert experiment_task.outputs == {"metrics": {"acc": 0.9}}
+    assert theory_task.status == TaskStatus.COMPLETED
+    assert theory_task.outputs == {"proof": "original"}

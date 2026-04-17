@@ -357,16 +357,25 @@ class PaperQAHandler:
         )
 
         # Determine which tasks to re-run
-        rewrite_tasks = ["writer"] if writer_only else ["theory", "writer"]
+        if writer_only:
+            rewrite_tasks = ["writer"]
+        else:
+            rewrite_tasks = ["theory", "experiment", "writer"]
 
         # Snapshot previous task outputs so we can restore on failure
         theory_task = next(
             (t for t in pipeline.tasks if t.name == "theory"), None
         )
+        experiment_task = next(
+            (t for t in pipeline.tasks if t.name == "experiment"), None
+        )
         writer_task = next(
             (t for t in pipeline.tasks if t.name == "writer"), None
         )
         prev_theory_outputs = dict(theory_task.outputs) if theory_task else {}
+        prev_experiment_outputs = (
+            dict(experiment_task.outputs) if experiment_task else {}
+        )
         prev_writer_outputs = dict(writer_task.outputs) if writer_task else {}
         prev_theory_desc = theory_task.description if theory_task else ""
 
@@ -380,6 +389,9 @@ class PaperQAHandler:
             theory_task.description = (theory_task.description or "") + feedback
             theory_task.retries = 0
             theory_task.status = TaskStatus.PENDING
+        if not writer_only and experiment_task is not None:
+            experiment_task.retries = 0
+            experiment_task.status = TaskStatus.PENDING
         if writer_task is not None:
             writer_task.retries = 0
             writer_task.status = TaskStatus.PENDING
@@ -436,6 +448,10 @@ class PaperQAHandler:
                 theory_task.outputs = prev_theory_outputs
                 theory_task.error_message = ""
                 theory_task.description = prev_theory_desc
+            if experiment_task is not None:
+                experiment_task.status = TaskStatus.COMPLETED
+                experiment_task.outputs = prev_experiment_outputs
+                experiment_task.error_message = ""
             if writer_task is not None:
                 writer_task.status = TaskStatus.COMPLETED
                 writer_task.outputs = prev_writer_outputs
