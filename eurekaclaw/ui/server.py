@@ -2261,11 +2261,10 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 action = str(payload.get("action", "no")).strip()
                 question = str(payload.get("question", "")).strip()
                 ok = _rg.submit_paper_qa(session_id, PaperQADecision(action=action, question=question))
-                # Persist only after submit succeeded — a rejected gate
-                # (stale / not active) shouldn't leave a rewrite marker
-                # in history for a rewrite that will never happen.
-                if ok and action == "rewrite":
-                    self._append_paper_qa_rewrite_marker(session_id, question)
+                # We intentionally do NOT write a rewrite marker here —
+                # submit only queues the decision. PaperQAHandler persists
+                # the "↻ Rewrite requested" entry itself, but only after
+                # the rewrite actually produces a new paper version.
             else:
                 self._send_json({"error": f"Unknown gate type: {gate_type}"}, status=HTTPStatus.BAD_REQUEST)
                 return

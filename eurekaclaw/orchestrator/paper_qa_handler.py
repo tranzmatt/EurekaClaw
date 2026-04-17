@@ -153,10 +153,8 @@ class PaperQAHandler:
             if decision.action == "rebuttal":
                 agent = self._get_or_create_qa_agent()
                 result = await agent.ask(
-                    question=decision.question, latex=latex, history=[
-                        {"role": h["role"], "content": h["content"]}
-                        for h in self._history
-                    ],
+                    question=decision.question, latex=latex,
+                    history=self._clean_history_for_agent(),
                 )
                 if result.failed:
                     logger.warning("PaperQAAgent failed: %s", result.error)
@@ -178,16 +176,25 @@ class PaperQAHandler:
                     self._persist_history()
 
             elif decision.action == "rewrite":
-                self._history.append({
-                    "role": "user",
-                    "content": decision.question,
-                    "ts": datetime.now(timezone.utc).isoformat(),
-                    "version": self._paper_version,
-                })
                 new_latex = await self._do_rewrite(
                     pipeline, brief, revision_prompt=decision.question
                 )
                 if new_latex is not None:
+                    # Persist a rewrite marker matching the frontend's
+                    # "↻" convention. Written AFTER success so a failed
+                    # rewrite doesn't leave a marker in history for work
+                    # that was never done.
+                    marker = {
+                        "role": "system",
+                        "content": f'↻ Rewrite requested: "{decision.question}"',
+                        "ts": datetime.now(timezone.utc).isoformat(),
+                        "version": self._paper_version,
+                    }
+                    self._history.append(marker)
+                    self._session_dir.mkdir(parents=True, exist_ok=True)
+                    marker_path = self._session_dir / "paper_qa_history.jsonl"
+                    with marker_path.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(marker, ensure_ascii=False) + "\n")
                     self._save_paper_version(new_latex)
                     latex = new_latex
                     self.bus.put("paper_qa_latex", latex)
@@ -292,12 +299,9 @@ class PaperQAHandler:
 
     async def _ask_qa_agent(self, latex: str, question: str) -> str:
         agent = self._get_or_create_qa_agent()
-        # Pass only role-content pairs to the agent (strip metadata)
-        clean_history = [
-            {"role": h["role"], "content": h["content"]} for h in self._history
-        ]
         result = await agent.ask(
-            question=question, latex=latex, history=clean_history
+            question=question, latex=latex,
+            history=self._clean_history_for_agent(),
         )
         if result.failed:
             console.print(f"[red]QA Agent error: {result.error}[/red]")
@@ -555,13 +559,30 @@ class PaperQAHandler:
         path = self._session_dir / f"rewrite_context_v{self._paper_version}.json"
         path.write_text(json.dumps(ctx, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    def _clean_history_for_agent(self) -> list[dict[str, str]]:
+        """Return history as role/content pairs the LLM API accepts.
+
+        Strips metadata (ts, version) and drops any non user/assistant
+        entries — the Anthropic messages API rejects role="system" in
+        the message list, and our rewrite markers use that role.
+        """
+        return [
+            {"role": h["role"], "content": h["content"]}
+            for h in self._history
+            if h["role"] in ("user", "assistant")
+        ]
+
     def _summarize_qa_history(self) -> str:
         """Build a concise text summary of the QA conversation for feedback injection."""
         if not self._history:
             return "(no prior discussion)"
         parts: list[str] = []
         for h in self._history:
+            # Skip system markers (e.g. "↻ Rewrite requested: …") —
+            # those are UI history artifacts, not QA conversation turns.
+            if h["role"] not in ("user", "assistant"):
+                continue
             role = "User" if h["role"] == "user" else "QA Agent"
             content = h["content"][:300]
             parts.append(f"{role}: {content}")
-        return "\n".join(parts)
+        return "\n".join(parts) if parts else "(no prior discussion)"
