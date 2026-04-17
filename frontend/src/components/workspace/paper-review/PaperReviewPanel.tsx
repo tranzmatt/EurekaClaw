@@ -16,13 +16,19 @@ interface HistoryResponse {
 const SPLIT_KEY = 'eurekaclaw-review-split';
 const MIN_SPLIT = 30;
 const MAX_SPLIT = 70;
+const DEFAULT_SPLIT = 55;
+
+function loadInitialSplit(): number {
+  const saved = localStorage.getItem(SPLIT_KEY);
+  if (!saved) return DEFAULT_SPLIT;
+  const parsed = parseFloat(saved);
+  if (!Number.isFinite(parsed)) return DEFAULT_SPLIT;
+  return Math.min(MAX_SPLIT, Math.max(MIN_SPLIT, parsed));
+}
 
 export function PaperReviewPanel({ run }: PaperReviewPanelProps) {
   const [messages, setMessages] = useState<QAMessage[]>([]);
-  const [splitPct, setSplitPct] = useState(() => {
-    const saved = localStorage.getItem(SPLIT_KEY);
-    return saved ? Number(saved) : 55;
-  });
+  const [splitPct, setSplitPct] = useState(loadInitialSplit);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 

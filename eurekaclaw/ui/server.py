@@ -1613,7 +1613,12 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             if run is None:
                 self._send_json({"error": "Run not found"}, status=HTTPStatus.NOT_FOUND)
                 return
-            session_id = run.eureka_session_id or ""
+            session_id = run.eureka_session_id
+            if not session_id:
+                # No session id yet — return empty rather than reading
+                # settings.runs_dir / "" which would mix history across runs.
+                self._send_json({"messages": []})
+                return
             import json as _json
             history_file = settings.runs_dir / session_id / "paper_qa_history.jsonl"
             messages = []
