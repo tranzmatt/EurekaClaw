@@ -120,23 +120,21 @@ if not paper_tex.exists():
 New module-level helper in `server.py`. Replaces the ad-hoc bus-hydration logic currently scattered across `/paper-qa/ask`, `/paper-qa/history`, and the deleted `/review` endpoint.
 
 ```python
-def _ensure_bus_activated(run: Run) -> tuple[SharedBus, Pipeline, ResearchBrief]:
+def _ensure_bus_activated(run) -> tuple[KnowledgeBus, TaskPipeline, ResearchBrief]:
     """Return (bus, pipeline, brief) for a run.
 
-    - If the run's EurekaSession is live, return its in-memory bus.
-    - Otherwise hydrate a fresh bus from the session's on-disk artifacts
-      and return that. Either way, the returned bus is fully populated
-      with the writer output, pipeline tasks, and research brief needed
-      by paper-QA endpoints.
+    - If the run's EurekaSession is live and its bus has a pipeline,
+      return the in-memory bus + its pipeline + its brief.
+    - Otherwise hydrate from disk via SessionLoader.load(session_id),
+      which reads {session_dir}/pipeline.json, research_brief.json, etc.
     """
     session = run.eureka_session
-    if session and session.bus.get_writer_output():
-        return session.bus, session.pipeline, session.brief
+    if session and session.bus and session.bus.get_pipeline() is not None:
+        bus = session.bus
+        return bus, bus.get_pipeline(), bus.get_research_brief()
     # Historical or stalled run — hydrate from disk.
-    session_dir = settings.runs_dir / run.run_id
-    bus = SharedBus.from_session_dir(session_dir)
-    pipeline = bus.get_pipeline()
-    brief = bus.get_research_brief()
+    from eurekaclaw.orchestrator.session_loader import SessionLoader
+    bus, brief, pipeline = SessionLoader.load(run.eureka_session_id)
     return bus, pipeline, brief
 ```
 
@@ -238,34 +236,51 @@ Experiment is reset alongside theory and writer. Snapshot/restore logic (lines 3
 
 ```python
 from pathlib import Path
-from eurekaclaw.io.shared_bus import SharedBus
+from eurekaclaw.knowledge_bus.bus import KnowledgeBus
 
-def on_writer_complete(bus: SharedBus, session_id: str,
+def on_writer_complete(bus: KnowledgeBus, session_id: str,
                         session_dir: Path) -> None:
     """Post-writer artifact housekeeping. Called from:
       - MetaOrchestrator main loop after writer task completes
-      - server.py _run_rewrite_bg, indirectly, via the same orchestrator path
-    Idempotent — calling twice is a no-op on the second call.
+      - PaperQAHandler._do_rewrite on rewrite success
+    Reads writer latex from the pipeline (same pattern as
+    _sync_latex_to_disk). No-op when writer output is missing/empty.
     """
-    latex = bus.get_writer_output() or ""
+    pipeline = bus.get_pipeline()
+    if not pipeline:
+        return
+    writer = next((t for t in pipeline.tasks if t.name == "writer"), None)
+    if writer is None or not writer.outputs:
+        return
+    latex = writer.outputs.get("latex_paper", "") or ""
     if not latex:
         return
-    _bump_writer_paper_version(bus)
+    _bump_writer_paper_version(bus)       # moved from server.py:1264-1284
     session_dir.mkdir(parents=True, exist_ok=True)
     (session_dir / "paper.tex").write_text(latex, encoding="utf-8")
     stale_pdf = session_dir / "paper.pdf"
     if stale_pdf.exists():
-        stale_pdf.unlink()      # invalidate cache — next compile rebuilds
+        stale_pdf.unlink()                # invalidate cache — next compile rebuilds
     bus.persist(session_dir)
 
 
-def _bump_writer_paper_version(bus: SharedBus) -> None:
-    """Moved from server.py:1264-1298. Same logic."""
-    output = bus.get_writer_output_raw() or {}
-    current = int(output.get("paper_version", 0) or 0)
-    output["paper_version"] = current + 1
-    bus.put_writer_output(output)
+def _bump_writer_paper_version(bus: KnowledgeBus) -> int:
+    """Moved verbatim from server.py:1264-1284."""
+    pipeline = bus.get_pipeline()
+    if not pipeline:
+        return 0
+    writer = next((t for t in pipeline.tasks if t.name == "writer"), None)
+    if writer is None:
+        return 0
+    outputs = writer.outputs or {}
+    new_version = int(outputs.get("paper_version", 1)) + 1
+    outputs["paper_version"] = new_version
+    writer.outputs = outputs
+    bus.put_pipeline(pipeline)
+    return new_version
 ```
+
+Because `_bump_writer_paper_version` is moved (not duplicated), `server.py` imports it back from `eurekaclaw.ui.writer_hook` at the one remaining call site (inside `/compile-pdf` if any — actually none after this refactor; check with grep during step 1 and remove the old definition).
 
 ### 4.8 Pipeline integration of the hook
 
