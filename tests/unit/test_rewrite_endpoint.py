@@ -131,6 +131,28 @@ def test_mark_rewrite_tasks_failed_also_covers_experiment(run_with_bus):
     assert next(t for t in pipeline.tasks if t.name == "experiment").status == TaskStatus.FAILED
 
 
+def test_handle_stale_paper_qa_gate_noop_when_already_completed(run_with_bus):
+    """Cleanup must NOT overwrite a legitimately completed gate.
+
+    Scenario: user's Accept was processed, paper_qa_gate is COMPLETED, the
+    orchestrator finished and unregistered the in-memory gate entry. A
+    duplicate Accept click now fails submit_paper_qa and the cleanup helper
+    runs. If the helper blindly flips the task to FAILED it corrupts a
+    successful acceptance.
+    """
+    from eurekaclaw.ui.server import _handle_stale_paper_qa_gate
+
+    _run, bus, _runs_dir = run_with_bus
+    pipeline = bus.get_pipeline()
+    qa = next(t for t in pipeline.tasks if t.name == "paper_qa_gate")
+    qa.status = TaskStatus.COMPLETED
+    bus.put_pipeline(pipeline)
+
+    _handle_stale_paper_qa_gate(pipeline, bus, "test-rewrite-001")
+
+    assert next(t for t in pipeline.tasks if t.name == "paper_qa_gate").status == TaskStatus.COMPLETED
+
+
 def test_handle_stale_paper_qa_gate_flips_to_failed_and_persists(run_with_bus):
     """Stale-gate cleanup: AWAITING_GATE on disk with no live in-memory entry.
 

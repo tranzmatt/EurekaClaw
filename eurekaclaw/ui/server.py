@@ -1383,16 +1383,17 @@ def _mark_rewrite_tasks_failed(pipeline, bus) -> None:
 
 
 def _handle_stale_paper_qa_gate(pipeline, bus, session_id: str) -> None:
-    """Flip a stale paper_qa_gate task to FAILED and persist.
+    """Flip a stale AWAITING_GATE paper_qa_gate task to FAILED and persist.
 
-    Called from /rewrite when the pipeline shows AWAITING_GATE on disk but
-    the in-memory gate entry is gone (orchestrator died, server restart, or
-    entry was already consumed). Without this, the UI keeps presenting the
-    Accept/Rewrite gate buttons even though submit_paper_qa silently drops
-    them. Persisting ensures a reload sees the new state too.
+    Called from /rewrite and /gate/paper_qa when submit_paper_qa returns
+    False. Only flips the task when its current status is AWAITING_GATE —
+    otherwise the helper is a no-op. The guard matters because a duplicate
+    Accept click after the orchestrator finishes (paper_qa_gate=COMPLETED,
+    gate entry unregistered) also produces submit_paper_qa=False, and we
+    must not corrupt a legitimately completed gate into FAILED.
     """
     qa = next((t for t in pipeline.tasks if t.name == "paper_qa_gate"), None)
-    if qa is None or qa.status == TaskStatus.FAILED:
+    if qa is None or qa.status != TaskStatus.AWAITING_GATE:
         return
     qa.status = TaskStatus.FAILED
     bus.put_pipeline(pipeline)
