@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useSessionStore } from '@/store/sessionStore';
-import { truncateSessionName } from '@/lib/formatters';
+import { truncateSessionName, parseServerTimestamp } from '@/lib/formatters';
 import { compactRunMeta } from '@/lib/statusHelpers';
 import { useElapsedTimer } from '@/hooks/useElapsedTimer';
 import { apiPost } from '@/api/client';
@@ -40,8 +40,10 @@ export function SessionTopBar({ run }: SessionTopBarProps) {
   const total = totals.input + totals.output;
 
   // Live elapsed ticker — only active while the run is running.
+  // Uses parseServerTimestamp so naive ISO timestamps from the
+  // server (which are UTC) aren't misread as local time.
   const startedAt = useMemo(
-    () => (run.started_at ? new Date(run.started_at) : null),
+    () => parseServerTimestamp(run.started_at),
     [run.started_at]
   );
   const elapsed = useElapsedTimer(run.status === 'running' ? startedAt : null);
