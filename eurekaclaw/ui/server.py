@@ -1382,6 +1382,29 @@ def _mark_rewrite_tasks_failed(pipeline, bus) -> None:
         bus.put_pipeline(pipeline)
 
 
+def _handle_stale_paper_qa_gate(pipeline, bus, session_id: str) -> None:
+    """Flip a stale paper_qa_gate task to FAILED and persist.
+
+    Called from /rewrite when the pipeline shows AWAITING_GATE on disk but
+    the in-memory gate entry is gone (orchestrator died, server restart, or
+    entry was already consumed). Without this, the UI keeps presenting the
+    Accept/Rewrite gate buttons even though submit_paper_qa silently drops
+    them. Persisting ensures a reload sees the new state too.
+    """
+    qa = next((t for t in pipeline.tasks if t.name == "paper_qa_gate"), None)
+    if qa is None or qa.status == TaskStatus.FAILED:
+        return
+    qa.status = TaskStatus.FAILED
+    bus.put_pipeline(pipeline)
+    try:
+        bus.persist(settings.runs_dir / session_id)
+    except Exception:
+        logger.exception(
+            "Could not persist pipeline after stale gate for %s",
+            session_id,
+        )
+
+
 def _append_paper_qa_rewrite_marker_file(session_id: str, prompt: str) -> None:
     """Module-level counterpart to the HTTP handler's rewrite-marker method.
 
@@ -2255,21 +2278,27 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 return
 
             # Gate-live path: live orchestrator is still waiting on paper_qa_gate.
+            # submit_paper_qa returns False when the in-memory gate entry is
+            # missing (orchestrator died, server restart) — in that case we
+            # clean up the stale AWAITING_GATE on disk and fall through to the
+            # bg path so the user's rewrite intent still gets honored.
             paper_qa_task = next(
                 (t for t in pipeline.tasks if t.name == "paper_qa_gate"), None
             )
             if paper_qa_task is not None and paper_qa_task.status == TaskStatus.AWAITING_GATE:
                 from eurekaclaw.ui import review_gate
                 from eurekaclaw.ui.review_gate import PaperQADecision
-                review_gate.submit_paper_qa(
+                submitted = review_gate.submit_paper_qa(
                     run.eureka_session_id,
                     PaperQADecision(action="rewrite", question=prompt),
                 )
-                self._send_json(
-                    {"ok": True, "mode": "gate"},
-                    status=HTTPStatus.ACCEPTED,
-                )
-                return
+                if submitted:
+                    self._send_json(
+                        {"ok": True, "mode": "gate"},
+                        status=HTTPStatus.ACCEPTED,
+                    )
+                    return
+                _handle_stale_paper_qa_gate(pipeline, bus, run.eureka_session_id)
 
             # Background path: orchestrator is idle/completed. Spawn a thread.
             rewrite_id = str(uuid.uuid4())

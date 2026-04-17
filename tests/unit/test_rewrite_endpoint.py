@@ -131,6 +131,38 @@ def test_mark_rewrite_tasks_failed_also_covers_experiment(run_with_bus):
     assert next(t for t in pipeline.tasks if t.name == "experiment").status == TaskStatus.FAILED
 
 
+def test_handle_stale_paper_qa_gate_flips_to_failed_and_persists(run_with_bus):
+    """Stale-gate cleanup: AWAITING_GATE on disk with no live in-memory entry.
+
+    When /rewrite's gate submit fails (orchestrator died / server restarted /
+    gate entry cleared), the helper must flip paper_qa_gate to FAILED and
+    persist the pipeline so the UI stops presenting Accept/Rewrite buttons
+    and the endpoint can safely fall through to the background path.
+    """
+    from eurekaclaw.ui.server import _handle_stale_paper_qa_gate
+
+    _run, bus, runs_dir = run_with_bus
+    pipeline = bus.get_pipeline()
+    qa = next(t for t in pipeline.tasks if t.name == "paper_qa_gate")
+    qa.status = TaskStatus.AWAITING_GATE
+    bus.put_pipeline(pipeline)
+
+    _handle_stale_paper_qa_gate(pipeline, bus, "test-rewrite-001")
+
+    # In-memory pipeline mutated.
+    assert next(t for t in pipeline.tasks if t.name == "paper_qa_gate").status == TaskStatus.FAILED
+    # And persisted — re-read from bus, which was persisted to runs_dir.
+    reloaded_pipeline = bus.get_pipeline()
+    assert next(t for t in reloaded_pipeline.tasks if t.name == "paper_qa_gate").status == TaskStatus.FAILED
+    # Pipeline file on disk also shows FAILED.
+    pipeline_file = runs_dir / "test-rewrite-001" / "pipeline.json"
+    assert pipeline_file.exists()
+    import json
+    data = json.loads(pipeline_file.read_text(encoding="utf-8"))
+    qa_on_disk = next(t for t in data["tasks"] if t["name"] == "paper_qa_gate")
+    assert qa_on_disk["status"] == "failed"
+
+
 def test_append_rewrite_marker_writes_jsonl_line(run_with_bus):
     from eurekaclaw.ui.server import _append_paper_qa_rewrite_marker_file
 
