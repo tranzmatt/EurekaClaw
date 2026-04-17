@@ -1411,6 +1411,49 @@ def _mark_rewrite_tasks_pending(pipeline, bus) -> None:
 _REWRITE_CLAIM_LOCK = threading.Lock()
 _REWRITE_CLAIM_SESSIONS: set[str] = set()
 
+# Non-task bus artifacts written by theory/experiment/writer agents during
+# a rewrite. Snapshot before _do_rewrite and restore on failure so a failed
+# rewrite doesn't leak stale analysis into the next attempt. Task outputs
+# (theory/experiment/writer.outputs) are already restored by _do_rewrite
+# itself; this list covers everything OUTSIDE the pipeline tasks.
+#
+# If you add an agent that writes new bus keys during theory/experiment/
+# writer, add the key here so the rollback covers it.
+_REWRITE_MUTABLE_BUS_KEYS: tuple[str, ...] = (
+    "resource_analysis",
+    "numerically_suspect_lemmas",
+    "revision_feedback",
+)
+
+
+_REWRITE_ARTIFACT_UNSET = object()
+
+
+def _snapshot_rewrite_bus_artifacts(bus) -> dict[str, Any]:
+    """Snapshot bus artifacts that rewrite agents may mutate.
+
+    Returns a dict mapping key → prior value, or _REWRITE_ARTIFACT_UNSET
+    for keys that weren't set. Pair with _restore_rewrite_bus_artifacts.
+    """
+    return {
+        key: bus.get(key, _REWRITE_ARTIFACT_UNSET)
+        for key in _REWRITE_MUTABLE_BUS_KEYS
+    }
+
+
+def _restore_rewrite_bus_artifacts(bus, snapshot: dict[str, Any]) -> None:
+    """Restore bus artifacts from a snapshot taken before _do_rewrite.
+
+    Keys that were unset before are not re-deleted (the bus API has no
+    uniform delete); callers accept that a new rewrite-introduced key
+    may linger after rollback. In practice the rewrite agents overwrite
+    existing keys, so this is rare.
+    """
+    for key, prior in snapshot.items():
+        if prior is _REWRITE_ARTIFACT_UNSET:
+            continue
+        bus.put(key, prior)
+
 
 def _claim_rewrite_slot(session_id: str) -> bool:
     """Claim a per-session rewrite slot. Returns True iff claim succeeded.
@@ -1543,6 +1586,11 @@ def _run_rewrite_bg(run, bus, pipeline, brief, prompt: str, rewrite_id: str) -> 
     error marker.
     """
     session_id = run.eureka_session_id
+    # Snapshot non-task bus artifacts BEFORE any agent runs. If the rewrite
+    # fails (soft failure OR exception), restore them so the next rewrite
+    # doesn't inherit stale analysis from the failed attempt. _do_rewrite
+    # already restores task outputs internally; this covers what it doesn't.
+    artifact_snapshot = _snapshot_rewrite_bus_artifacts(bus)
     try:
         orchestrator = MetaOrchestrator(bus=bus, client=create_client())
         handler = PaperQAHandler(
@@ -1565,9 +1613,12 @@ def _run_rewrite_bg(run, bus, pipeline, brief, prompt: str, rewrite_id: str) -> 
             _append_paper_qa_rewrite_marker_file(session_id, prompt)
             bus.persist(settings.runs_dir / session_id)
         else:
+            # Soft failure: restore bus artifacts, then surface as error.
+            _restore_rewrite_bus_artifacts(bus, artifact_snapshot)
             _append_paper_qa_error_marker(session_id, "Rewrite produced no new paper")
     except Exception as e:
         logger.exception("Rewrite background task %s failed: %s", rewrite_id, e)
+        _restore_rewrite_bus_artifacts(bus, artifact_snapshot)
         _mark_rewrite_tasks_failed(pipeline, bus)
         try:
             bus.persist(settings.runs_dir / session_id)

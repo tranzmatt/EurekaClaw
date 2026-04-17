@@ -458,6 +458,110 @@ def test_run_rewrite_bg_releases_slot_on_failure(run_with_bus, monkeypatch):
     srv._release_rewrite_slot(run.eureka_session_id)
 
 
+def test_run_rewrite_bg_restores_bus_artifacts_on_none_return(run_with_bus, monkeypatch):
+    """_do_rewrite returning None (soft failure) must not leak bus mutations.
+
+    Theory/experiment agents write to non-task bus keys (resource_analysis,
+    numerically_suspect_lemmas) that _do_rewrite's own task-output restore
+    does not touch. If those mutations survive a failed rewrite, subsequent
+    /rewrite or /paper-qa/ask calls read stale analysis that no longer
+    matches the task outputs they coexist with.
+    """
+    from eurekaclaw.ui import server as srv
+
+    run, bus, _runs_dir = run_with_bus
+    pipeline = bus.get_pipeline()
+    brief = bus.get_research_brief()
+
+    bus.put("resource_analysis", {"verdict": "original"})
+    bus.put("numerically_suspect_lemmas", ["prev-L1"])
+
+    async def _fake_do_rewrite(self, pipe, br, revision_prompt=None, writer_only=False):
+        # Simulate theory/experiment agents mutating bus artifacts.
+        self.bus.put("resource_analysis", {"verdict": "mutated-by-failed-rewrite"})
+        self.bus.put("numerically_suspect_lemmas", ["mutated-L9"])
+        return None  # Soft failure: no new paper.
+
+    monkeypatch.setattr(
+        "eurekaclaw.orchestrator.paper_qa_handler.PaperQAHandler._do_rewrite",
+        _fake_do_rewrite,
+    )
+    fake_orch = MagicMock()
+    for attr in ("agents", "router", "client", "tool_registry",
+                 "skill_injector", "memory", "gate"):
+        setattr(fake_orch, attr, MagicMock() if attr != "agents" else {})
+    monkeypatch.setattr(srv, "MetaOrchestrator", MagicMock(return_value=fake_orch))
+    monkeypatch.setattr(srv, "create_client", MagicMock())
+
+    srv._run_rewrite_bg(run, bus, pipeline, brief, "attempt", "rw-rollback-1")
+
+    assert bus.get("resource_analysis") == {"verdict": "original"}
+    assert bus.get("numerically_suspect_lemmas") == ["prev-L1"]
+
+
+def test_run_rewrite_bg_restores_bus_artifacts_on_exception(run_with_bus, monkeypatch):
+    """Exception path must also restore — the old /review/rewrite did a
+    filesystem rollback for exactly this case."""
+    from eurekaclaw.ui import server as srv
+
+    run, bus, _runs_dir = run_with_bus
+    pipeline = bus.get_pipeline()
+    brief = bus.get_research_brief()
+
+    bus.put("resource_analysis", {"verdict": "original"})
+
+    async def _boom(self, pipe, br, revision_prompt=None, writer_only=False):
+        self.bus.put("resource_analysis", {"verdict": "mutated-mid-crash"})
+        raise RuntimeError("crash after mutation")
+
+    monkeypatch.setattr(
+        "eurekaclaw.orchestrator.paper_qa_handler.PaperQAHandler._do_rewrite",
+        _boom,
+    )
+    fake_orch = MagicMock()
+    for attr in ("agents", "router", "client", "tool_registry",
+                 "skill_injector", "memory", "gate"):
+        setattr(fake_orch, attr, MagicMock() if attr != "agents" else {})
+    monkeypatch.setattr(srv, "MetaOrchestrator", MagicMock(return_value=fake_orch))
+    monkeypatch.setattr(srv, "create_client", MagicMock())
+
+    srv._run_rewrite_bg(run, bus, pipeline, brief, "crashy", "rw-rollback-2")
+
+    assert bus.get("resource_analysis") == {"verdict": "original"}
+
+
+def test_run_rewrite_bg_preserves_successful_bus_mutations(run_with_bus, monkeypatch):
+    """On success, the agents' intended mutations MUST persist — the
+    rollback logic must only fire on failure paths."""
+    from eurekaclaw.ui import server as srv
+
+    run, bus, _runs_dir = run_with_bus
+    pipeline = bus.get_pipeline()
+    brief = bus.get_research_brief()
+
+    bus.put("resource_analysis", {"verdict": "original"})
+
+    async def _successful(self, pipe, br, revision_prompt=None, writer_only=False):
+        self.bus.put("resource_analysis", {"verdict": "new-from-successful-rewrite"})
+        return r"\section{new}"
+
+    monkeypatch.setattr(
+        "eurekaclaw.orchestrator.paper_qa_handler.PaperQAHandler._do_rewrite",
+        _successful,
+    )
+    fake_orch = MagicMock()
+    for attr in ("agents", "router", "client", "tool_registry",
+                 "skill_injector", "memory", "gate"):
+        setattr(fake_orch, attr, MagicMock() if attr != "agents" else {})
+    monkeypatch.setattr(srv, "MetaOrchestrator", MagicMock(return_value=fake_orch))
+    monkeypatch.setattr(srv, "create_client", MagicMock())
+
+    srv._run_rewrite_bg(run, bus, pipeline, brief, "ok", "rw-rollback-3")
+
+    # Successful rewrite: new artifact value must persist.
+    assert bus.get("resource_analysis") == {"verdict": "new-from-successful-rewrite"}
+
+
 def test_run_rewrite_bg_catches_exceptions_and_marks_failed(run_with_bus, monkeypatch):
     from eurekaclaw.ui import server as srv
 
