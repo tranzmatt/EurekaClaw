@@ -9,8 +9,8 @@ interface QAChatProps {
   setMessages: React.Dispatch<React.SetStateAction<QAMessage[]>>;
   isRewriting: boolean;
   isHistorical: boolean;
-  onAccept: () => void;
-  onRewrite: (prompt: string) => void;
+  onAccept: () => void | Promise<void>;
+  onRewrite: (prompt: string) => void | Promise<void>;
 }
 
 interface AskResponse {

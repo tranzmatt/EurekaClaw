@@ -1,117 +1,63 @@
-import { useState, useEffect, useCallback } from 'react';
-import type { SessionRun, QAMessage } from '@/types';
-import { apiGet, apiPost } from '@/api/client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { SessionRun } from '@/types';
 import { PaperViewer } from './paper-review/PaperViewer';
 import { QAChat } from './paper-review/QAChat';
+import { usePaperSession } from './paper-review/usePaperSession';
 
 interface PaperPanelProps {
   run: SessionRun | null;
 }
 
-interface HistoryResponse {
-  messages: QAMessage[];
+const SPLIT_KEY = 'eurekaclaw-review-split';
+const MIN_SPLIT = 30;
+const MAX_SPLIT = 70;
+const DEFAULT_SPLIT = 55;
+
+function loadInitialSplit(): number {
+  const saved = localStorage.getItem(SPLIT_KEY);
+  if (!saved) return DEFAULT_SPLIT;
+  const parsed = parseFloat(saved);
+  if (!Number.isFinite(parsed)) return DEFAULT_SPLIT;
+  return Math.min(MAX_SPLIT, Math.max(MIN_SPLIT, parsed));
 }
 
-/**
- * Unified Paper panel — flat layout with PDF/LaTeX viewer and inline QA.
- *
- * For completed sessions: shows paper preview + QA chat side by side.
- * For running/pending: shows progress placeholder.
- * No separate "Review Paper" button needed — the review is always available.
- */
 export function PaperPanel({ run }: PaperPanelProps) {
-  const [messages, setMessages] = useState<QAMessage[]>([]);
-  const [reviewStatus, setReviewStatus] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+  // Force the hook (and all downstream state) to reset on session switch.
+  return <PaperPanelInner key={run?.run_id ?? '__none__'} run={run} />;
+}
 
-  const isCompleted = run?.status === 'completed';
-  const isRunning = run?.status === 'running';
-  const isFailed = run?.status === 'failed';
-  const writerTask = run?.pipeline?.find((t) => t.name === 'writer');
-  const hasPaper = !!(
-    (writerTask?.outputs?.latex_paper) ||
-    run?.result?.latex_paper
-  );
+function PaperPanelInner({ run }: PaperPanelProps) {
+  const session = usePaperSession(run);
 
-  // Activate review mode (load bus on backend) when completed session has a paper
+  const [splitPct, setSplitPct] = useState(loadInitialSplit);
+  const [isDragging, setIsDragging] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const splitPctRef = useRef(splitPct);
+  splitPctRef.current = splitPct;
+
+  const handleMouseDown = useCallback(() => setIsDragging(true), []);
+
   useEffect(() => {
-    if (!isCompleted || !hasPaper || !run?.run_id || reviewStatus !== 'idle') return;
-    setReviewStatus('loading');
-    void (async () => {
-      try {
-        await apiPost(`/api/runs/${run.run_id}/review`, {});
-        setReviewStatus('ready');
-      } catch {
-        setReviewStatus('failed');
-      }
-    })();
-  }, [isCompleted, hasPaper, run?.run_id, reviewStatus]);
-
-  // Load QA history only after review is activated
-  useEffect(() => {
-    if (!run?.run_id || reviewStatus !== 'ready') return;
-    void (async () => {
-      try {
-        const data = await apiGet<HistoryResponse>(`/api/runs/${run.run_id}/paper-qa/history`);
-        setMessages(data.messages ?? []);
-      } catch {
-        setMessages([]);
-      }
-    })();
-  }, [run?.run_id, reviewStatus]);
-
-  const [isRewriting, setIsRewriting] = useState(false);
-
-  // Handle rewrite — calls theory + writer, then reloads the paper
-  const handleRewrite = useCallback(async (prompt: string) => {
-    if (!run?.run_id) return;
-    // Use "Rewrite requested" to match what the backend persists to
-    // paper_qa_history.jsonl, so the optimistic entry lines up with
-    // the canonical entry after a reload.
-    const sysMsg: QAMessage = {
-      role: 'system',
-      content: `↻ Rewrite requested: "${prompt}"`,
-      ts: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, sysMsg]);
-    setIsRewriting(true);
-    try {
-      const res = await apiPost<{ ok?: boolean; error?: string }>(
-        `/api/runs/${run.run_id}/review/rewrite`,
-        { revision_prompt: prompt },
-      );
-      if (res.ok) {
-        const doneMsg: QAMessage = {
-          role: 'system',
-          content: 'Paper revised successfully. Refreshing...',
-          ts: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, doneMsg]);
-        // Re-activate review to reload the bus with new artifacts
-        setReviewStatus('idle');
-      } else {
-        const errMsg: QAMessage = {
-          role: 'system',
-          content: `Revision failed: ${res.error || 'Unknown error'}`,
-          ts: new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, errMsg]);
-      }
-    } catch (e) {
-      const errMsg: QAMessage = {
-        role: 'system',
-        content: `Revision error: ${e instanceof Error ? e.message : String(e)}`,
-        ts: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, errMsg]);
-    } finally {
-      setIsRewriting(false);
+    if (!isDragging) return;
+    function onMouseMove(e: MouseEvent) {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      const pct = ((e.clientX - rect.left) / rect.width) * 100;
+      const clamped = Math.min(MAX_SPLIT, Math.max(MIN_SPLIT, pct));
+      setSplitPct(clamped);
     }
-  }, [run?.run_id]);
+    function onMouseUp() {
+      setIsDragging(false);
+      localStorage.setItem(SPLIT_KEY, String(splitPctRef.current));
+    }
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [isDragging]);
 
-  // Accept paper (only used during live gate, not historical)
-  const handleAccept = useCallback(() => {}, []);
-
-  // Not ready states
   if (!run) {
     return (
       <div className="paper-preview">
@@ -122,20 +68,12 @@ export function PaperPanel({ run }: PaperPanelProps) {
     );
   }
 
-  if (isRunning) {
-    return (
-      <div className="paper-preview">
-        <div className="paper-empty-state">
-          <div className="paper-progress-dots">
-            <span /><span /><span />
-          </div>
-          <p>Paper will appear once the writer agent completes.</p>
-        </div>
-      </div>
-    );
+  // session is non-null whenever run is non-null, but narrow for TS.
+  if (!session) {
+    return null;
   }
 
-  if (isFailed && !hasPaper) {
+  if (session.mode === 'failed') {
     return (
       <div className="paper-preview">
         <div className="paper-empty-state">
@@ -145,7 +83,19 @@ export function PaperPanel({ run }: PaperPanelProps) {
     );
   }
 
-  if (!hasPaper) {
+  if (session.mode === 'no-paper') {
+    if (run.status === 'running') {
+      return (
+        <div className="paper-preview">
+          <div className="paper-empty-state">
+            <div className="paper-progress-dots">
+              <span /><span /><span />
+            </div>
+            <p>Paper will appear once the writer agent completes.</p>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="paper-preview">
         <div className="paper-empty-state">
@@ -155,8 +105,7 @@ export function PaperPanel({ run }: PaperPanelProps) {
     );
   }
 
-  // Show loading state while activating review (loading bus on backend)
-  if (reviewStatus === 'loading') {
+  if (session.mode === 'loading-review') {
     return (
       <div className="paper-preview">
         <div className="paper-empty-state">
@@ -169,52 +118,44 @@ export function PaperPanel({ run }: PaperPanelProps) {
     );
   }
 
-  // Review activation failed — show paper viewer without QA chat
-  if (reviewStatus === 'failed') {
-    return (
-      <div className="paper-review-panel">
-        <div style={{ flex: 1, minWidth: 0, display: 'flex' }}>
-          <PaperViewer
-            run={run}
-            paperVersion={1}
-            isRewriting={false}
-            theoryStatus="completed"
-            writerStatus="completed"
-          />
-        </div>
-      </div>
-    );
-  }
-
-  // Flat split layout: PDF/LaTeX left, QA chat right
-  const paperVersion = 1 + messages.filter(
-    (m) => m.role === 'system' && m.content.startsWith('↻')
-  ).length;
-
   return (
-    <div className="paper-review-panel">
-      <div style={{ flex: '0 0 58%', minWidth: 0, display: 'flex' }}>
+    <div
+      className="paper-review-panel"
+      ref={containerRef}
+      style={{ userSelect: isDragging ? 'none' : undefined }}
+    >
+      {session.reviewError ? (
+        <div className="paper-review-error-banner">
+          Review activation failed: {session.reviewError}
+        </div>
+      ) : null}
+
+      <div style={{ flex: `0 0 ${splitPct}%`, minWidth: 0, display: 'flex' }}>
         <PaperViewer
-          key={run.run_id}
-          run={run}
-          paperVersion={paperVersion}
-          isRewriting={isRewriting}
-          theoryStatus={isRewriting ? 'in_progress' : 'completed'}
-          writerStatus={isRewriting ? 'pending' : 'completed'}
+          run={session.run}
+          paperVersion={session.paperVersion}
+          isRewriting={session.isRewriting}
+          theoryStatus={session.theoryStatus}
+          writerStatus={session.writerStatus}
         />
       </div>
 
-      <div className="review-divider review-divider-static" aria-hidden="true" />
+      <div
+        className={`review-divider${isDragging ? ' is-dragging' : ''}`}
+        onMouseDown={handleMouseDown}
+      >
+        <div className="review-divider-handle" />
+      </div>
 
       <div style={{ flex: 1, minWidth: 0, display: 'flex' }}>
         <QAChat
-          run={run}
-          messages={messages}
-          setMessages={setMessages}
-          isRewriting={isRewriting}
-          isHistorical={true}
-          onAccept={handleAccept}
-          onRewrite={handleRewrite}
+          run={session.run}
+          messages={session.messages}
+          setMessages={session.setMessages}
+          isRewriting={session.isRewriting}
+          isHistorical={session.isHistorical}
+          onAccept={session.onAccept}
+          onRewrite={session.onRewrite}
         />
       </div>
     </div>
