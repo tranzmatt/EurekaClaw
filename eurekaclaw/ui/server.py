@@ -21,6 +21,8 @@ from urllib.parse import urlparse
 
 if TYPE_CHECKING:
     from eurekaclaw.knowledge_bus.bus import KnowledgeBus
+    from eurekaclaw.types.artifacts import ResearchBrief
+    from eurekaclaw.types.tasks import TaskPipeline
 
 import subprocess as _subprocess
 import sys as _sys
