@@ -184,6 +184,43 @@ describe('usePaperSession', () => {
     );
   });
 
+  it('review-activation failure falls back to completed mode with reviewError set', async () => {
+    // Completed-history run: Effect 1 fires POST /review. Simulate it
+    // rejecting. The panel must NOT get stuck in 'loading-review'; it
+    // should settle on 'completed' so the paper and chat still render.
+    apiPostMock.mockRejectedValueOnce(new Error('bus load failed'));
+    apiGetMock.mockResolvedValue({ messages: [] });
+    const run = makeRun({
+      pipeline: [writerTask(1), paperQATask('completed')],
+    });
+    const { result } = renderHook(() => usePaperSession(run));
+
+    await waitFor(() => {
+      expect(result.current?.reviewError).toBe('bus load failed');
+    });
+    expect(result.current?.mode).toBe('completed');
+  });
+
+  it('onRewrite in completed mode keeps mode at completed (no flash to loading-review)', async () => {
+    apiGetMock.mockResolvedValue({ messages: [] });
+    apiPostMock.mockResolvedValue({ ok: true });
+    const run = makeRun({
+      pipeline: [writerTask(1), paperQATask('completed')],
+    });
+    const { result } = renderHook(() => usePaperSession(run));
+
+    await waitFor(() => expect(result.current?.mode).toBe('completed'));
+
+    await act(async () => {
+      await result.current!.onRewrite('tighten the proofs');
+    });
+
+    // After the POST resolves, mode must remain 'completed'. If the
+    // hook reset reviewStatus to 'idle', mode would flip to
+    // 'loading-review' and the viewer+chat would briefly vanish.
+    expect(result.current?.mode).toBe('completed');
+  });
+
   it('history-load failure preserves optimistic rewrite markers', async () => {
     // Gate mode so Effect 2 fires and hits the catch branch.
     const run = makeRun({

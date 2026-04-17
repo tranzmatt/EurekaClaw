@@ -73,7 +73,11 @@ export function usePaperSession(run: SessionRun | null): PaperSession | null {
     if (!hasPaper) return 'no-paper';
     if (paperQATask?.status === 'awaiting_gate') return 'gate';
     if (paperQATask?.status === 'completed' && pipelineRewriting) return 'rewriting';
-    if (reviewStatus !== 'ready') return 'loading-review';
+    // Only show the loading screen while activation is actively
+    // in-flight. On 'failed' fall through to 'completed' so the
+    // paper and chat still render with the error banner — the paper
+    // itself doesn't depend on the review bus being alive.
+    if (reviewStatus === 'idle' || reviewStatus === 'loading') return 'loading-review';
     return 'completed';
   }, [
     run,
@@ -171,7 +175,12 @@ export function usePaperSession(run: SessionRun | null): PaperSession | null {
           await apiPost(`/api/runs/${run.run_id}/review/rewrite`, {
             revision_prompt: prompt,
           });
-          setReviewStatus('idle');
+          // Don't clear reviewStatus — the bus stays activated and
+          // resetting to 'idle' would flash the panel back to the
+          // "Loading paper review..." state, hiding the paper. The
+          // pipeline's own theory→writer transition takes mode
+          // through 'rewriting', which re-fires the history load via
+          // Effect 2.
         }
       } catch (e) {
         const errMsg: QAMessage = {
