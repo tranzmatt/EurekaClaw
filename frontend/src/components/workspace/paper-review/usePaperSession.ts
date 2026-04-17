@@ -5,7 +5,6 @@ import type { SessionRun, QAMessage } from '@/types';
 
 export type PaperMode =
   | 'no-paper'
-  | 'loading-review'
   | 'gate'
   | 'rewriting'
   | 'completed'
@@ -29,7 +28,6 @@ export interface PaperSession {
   onAccept: () => Promise<void>;
   onRewrite: (prompt: string) => Promise<void>;
 
-  reviewError: string | null;
   isHistorical: boolean;
 }
 
@@ -37,10 +35,6 @@ type HistoryResponse = { messages: QAMessage[] };
 
 export function usePaperSession(run: SessionRun | null): PaperSession | null {
   const [messages, setMessages] = useState<QAMessage[]>([]);
-  const [reviewStatus, setReviewStatus] = useState<
-    'idle' | 'loading' | 'ready' | 'failed'
-  >('idle');
-  const [reviewError, setReviewError] = useState<string | null>(null);
   const [isRewriting, setIsRewriting] = useState(false);
 
   const writerTask = run?.pipeline?.find((t) => t.name === 'writer');
@@ -61,10 +55,8 @@ export function usePaperSession(run: SessionRun | null): PaperSession | null {
 
   const pipelineRewriting =
     theoryTask?.status === 'in_progress' ||
-    theoryTask?.status === 'running' ||
     theoryTask?.status === 'pending' ||
     writerTask?.status === 'in_progress' ||
-    writerTask?.status === 'running' ||
     writerTask?.status === 'pending';
 
   const mode: PaperMode = useMemo(() => {
@@ -72,52 +64,18 @@ export function usePaperSession(run: SessionRun | null): PaperSession | null {
     if (run.status === 'failed' && !hasPaper) return 'failed';
     if (!hasPaper) return 'no-paper';
     if (paperQATask?.status === 'awaiting_gate') return 'gate';
-    if (paperQATask?.status === 'completed' && pipelineRewriting) return 'rewriting';
-    // Only show the loading screen while activation is actively
-    // in-flight. On 'failed' fall through to 'completed' so the
-    // paper and chat still render with the error banner — the paper
-    // itself doesn't depend on the review bus being alive.
-    if (reviewStatus === 'idle' || reviewStatus === 'loading') return 'loading-review';
+    if (pipelineRewriting) return 'rewriting';
     return 'completed';
-  }, [
-    run,
-    hasPaper,
-    paperQATask?.status,
-    pipelineRewriting,
-    reviewStatus,
-  ]);
+  }, [run, hasPaper, paperQATask?.status, pipelineRewriting]);
 
-  // Effect 1: activate review (load bus server-side) for historical completed runs.
   useEffect(() => {
     if (!run?.run_id) return;
-    if (mode !== 'completed' && mode !== 'loading-review') return;
-    if (reviewStatus !== 'idle') return;
-    setReviewStatus('loading');
-    void (async () => {
-      try {
-        await apiPost(`/api/runs/${run.run_id}/review`, {});
-        setReviewStatus('ready');
-        setReviewError(null);
-      } catch (e) {
-        setReviewStatus('failed');
-        setReviewError(e instanceof Error ? e.message : String(e));
-      }
-    })();
-  }, [run?.run_id, mode, reviewStatus]);
-
-  // Effect 2: load history once bus is ready OR during gate/rewrite (bus is in-memory).
-  useEffect(() => {
-    if (!run?.run_id) return;
-    const canLoad =
-      reviewStatus === 'ready' || mode === 'gate' || mode === 'rewriting';
-    if (!canLoad) return;
     void (async () => {
       try {
         const data = await apiGet<HistoryResponse>(
           `/api/runs/${run.run_id}/paper-qa/history`,
         );
         const serverMsgs = data.messages ?? [];
-        // Preserve any optimistic rewrite markers not yet echoed by the server.
         setMessages((prev) => {
           const serverKeys = new Set(
             serverMsgs.map((m) => `${m.role}|${m.content}`),
@@ -142,7 +100,7 @@ export function usePaperSession(run: SessionRun | null): PaperSession | null {
         );
       }
     })();
-  }, [run?.run_id, reviewStatus, mode]);
+  }, [run?.run_id, mode]);
 
   const isHistorical = mode !== 'gate';
 
@@ -166,22 +124,9 @@ export function usePaperSession(run: SessionRun | null): PaperSession | null {
       setMessages((prev) => [...prev, marker]);
       setIsRewriting(true);
       try {
-        if (mode === 'gate') {
-          await apiPost(`/api/runs/${run.run_id}/gate/paper_qa`, {
-            action: 'rewrite',
-            question: prompt,
-          });
-        } else {
-          await apiPost(`/api/runs/${run.run_id}/review/rewrite`, {
-            revision_prompt: prompt,
-          });
-          // Don't clear reviewStatus — the bus stays activated and
-          // resetting to 'idle' would flash the panel back to the
-          // "Loading paper review..." state, hiding the paper. The
-          // pipeline's own theory→writer transition takes mode
-          // through 'rewriting', which re-fires the history load via
-          // Effect 2.
-        }
+        await apiPost(`/api/runs/${run.run_id}/rewrite`, {
+          revision_prompt: prompt,
+        });
       } catch (e) {
         const errMsg: QAMessage = {
           role: 'system',
@@ -193,7 +138,7 @@ export function usePaperSession(run: SessionRun | null): PaperSession | null {
         setIsRewriting(false);
       }
     },
-    [run?.run_id, mode],
+    [run?.run_id],
   );
 
   const paperVersion = useMemo(() => {
@@ -225,7 +170,6 @@ export function usePaperSession(run: SessionRun | null): PaperSession | null {
     writerStatus: writerTask?.status ?? 'pending',
     onAccept,
     onRewrite,
-    reviewError,
     isHistorical,
   };
 }
