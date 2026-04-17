@@ -116,31 +116,12 @@ function PaperPanelInner({ run }: PaperPanelProps) {
     );
   }
 
-  if (session.mode === 'loading-review') {
-    return (
-      <div className="paper-preview">
-        <div className="paper-empty-state">
-          <div className="paper-progress-dots">
-            <span /><span /><span />
-          </div>
-          <p>Loading paper review...</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div
       className="paper-review-panel"
       ref={containerRef}
       style={{ userSelect: isDragging ? 'none' : undefined }}
     >
-      {session.reviewError ? (
-        <div className="paper-review-error-banner">
-          Review activation failed: {session.reviewError}
-        </div>
-      ) : null}
-
       <div style={{ flex: `0 0 ${splitPct}%`, minWidth: 0, display: 'flex' }}>
         <PaperViewer
           run={session.run}
