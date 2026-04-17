@@ -40,6 +40,8 @@ from eurekaclaw.main import (
 )
 from eurekaclaw.skills.registry import SkillRegistry
 from eurekaclaw.types.tasks import InputSpec, ResearchOutput, TaskStatus
+from eurekaclaw.orchestrator.meta_orchestrator import MetaOrchestrator
+from eurekaclaw.orchestrator.paper_qa_handler import PaperQAHandler
 from eurekaclaw.ui.constants import REWRITE_MARKER_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -1342,6 +1344,131 @@ def _ensure_bus_activated(run) -> tuple["KnowledgeBus", "TaskPipeline", "Researc
     return bus, pipeline, brief
 
 
+def _unlink_stale_pdf(run) -> None:
+    """Delete paper.pdf from session_dir and output_dir if present.
+
+    Matches the cleanup _review/rewrite_ was doing inline; called after a
+    successful rewrite so the frontend's PDF iframe re-fetches the freshly
+    compiled file instead of the stale one.
+    """
+    candidates = []
+    session_id = getattr(run, "eureka_session_id", None)
+    if session_id:
+        candidates.append(settings.runs_dir / session_id / "paper.pdf")
+    if getattr(run, "output_dir", None):
+        candidates.append(Path(run.output_dir) / "paper.pdf")
+    for pdf_path in candidates:
+        try:
+            if pdf_path.is_file():
+                pdf_path.unlink()
+        except OSError:
+            logger.warning("Could not unlink stale PDF at %s", pdf_path, exc_info=True)
+
+
+def _mark_rewrite_tasks_failed(pipeline, bus) -> None:
+    """Flip theory/experiment/writer to FAILED if they were left IN_PROGRESS.
+
+    Called from the background-rewrite exception handler so the pipeline
+    settles in a visible terminal state — the frontend polls pipeline and
+    can otherwise see a phantom "in progress" forever.
+    """
+    changed = False
+    for name in ("theory", "experiment", "writer"):
+        task = next((t for t in pipeline.tasks if t.name == name), None)
+        if task is not None and task.status == TaskStatus.IN_PROGRESS:
+            task.status = TaskStatus.FAILED
+            changed = True
+    if changed:
+        bus.put_pipeline(pipeline)
+
+
+def _append_paper_qa_rewrite_marker_file(session_id: str, prompt: str) -> None:
+    """Module-level counterpart to the HTTP handler's rewrite-marker method.
+
+    Needed because _run_rewrite_bg is module-level (runs on a background
+    thread with no handler instance). The on-disk format and constants
+    match _append_paper_qa_rewrite_marker exactly.
+    """
+    if not session_id or not prompt:
+        return
+    from datetime import datetime as _dt, timezone as _tz
+    history_dir = settings.runs_dir / session_id
+    try:
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_file = history_dir / "paper_qa_history.jsonl"
+        entry = {
+            "role": "system",
+            "content": f'{REWRITE_MARKER_PREFIX}"{prompt}"',
+            "ts": _dt.now(_tz.utc).isoformat(),
+        }
+        with history_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        logger.warning("Could not append rewrite marker for %s", session_id, exc_info=True)
+
+
+def _append_paper_qa_error_marker(session_id: str, msg: str) -> None:
+    """Append a 'Revision error: <msg>' system line for the rewrite history."""
+    if not session_id or not msg:
+        return
+    from datetime import datetime as _dt, timezone as _tz
+    history_dir = settings.runs_dir / session_id
+    try:
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_file = history_dir / "paper_qa_history.jsonl"
+        entry = {
+            "role": "system",
+            "content": f"Revision error: {msg}",
+            "ts": _dt.now(_tz.utc).isoformat(),
+        }
+        with history_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        logger.warning("Could not append error marker for %s", session_id, exc_info=True)
+
+
+def _run_rewrite_bg(run, bus, pipeline, brief, prompt: str, rewrite_id: str) -> None:
+    """Thread entry point. Owns its own asyncio event loop.
+
+    On success: mutates pipeline in-place (theory → experiment → writer
+    re-run) through handler._do_rewrite, then syncs paper.tex to disk,
+    unlinks stale paper.pdf, bumps paper_version, appends rewrite marker,
+    persists bus.
+
+    On failure: catches everything, flips any IN_PROGRESS rewrite tasks
+    to FAILED so the frontend's pipeline poll settles, and appends an
+    error marker.
+    """
+    session_id = run.eureka_session_id
+    try:
+        orchestrator = MetaOrchestrator(bus=bus, client=create_client())
+        handler = PaperQAHandler(
+            bus=bus,
+            agents=orchestrator.agents,
+            router=orchestrator.router,
+            client=orchestrator.client,
+            tool_registry=orchestrator.tool_registry,
+            skill_injector=orchestrator.skill_injector,
+            memory=orchestrator.memory,
+            gate_controller=orchestrator.gate,
+        )
+        new_latex = asyncio.run(
+            handler._do_rewrite(pipeline, brief, revision_prompt=prompt)
+        )
+        if new_latex:
+            _sync_latex_to_disk(run)
+            _unlink_stale_pdf(run)
+            _bump_writer_paper_version(bus)
+            _append_paper_qa_rewrite_marker_file(session_id, prompt)
+            bus.persist(settings.runs_dir / session_id)
+        else:
+            _append_paper_qa_error_marker(session_id, "Rewrite produced no new paper")
+    except Exception as e:
+        logger.exception("Rewrite background task %s failed: %s", rewrite_id, e)
+        _mark_rewrite_tasks_failed(pipeline, bus)
+        _append_paper_qa_error_marker(session_id, f"Rewrite failed: {e}")
+
+
 def _extract_latex_error(log_path: Path, max_chars: int = 1200) -> str:
     """Pull the relevant pdflatex error excerpt out of paper.log.
 
@@ -2076,6 +2203,73 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             result = _install_skill(skillname)
             status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
             self._send_json(result, status=status)
+            return
+
+        # POST /api/runs/<run_id>/rewrite — unified rewrite entry point
+        parts_rw = parsed.path.strip("/").split("/")
+        if (len(parts_rw) == 4 and parts_rw[0] == "api" and parts_rw[1] == "runs"
+                and parts_rw[3] == "rewrite"):
+            run_id = parts_rw[2]
+            run = self.state.get_run(run_id)
+            if run is None:
+                self._send_json({"error": "Run not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            try:
+                bus, pipeline, brief = _ensure_bus_activated(run)
+            except (ValueError, FileNotFoundError) as e:
+                self._send_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            payload = self._read_json()
+            prompt = str(payload.get("revision_prompt", "")).strip()
+            if not prompt:
+                self._send_json(
+                    {"error": "revision_prompt required"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            # Concurrency guard — refuse if a rewrite is already in flight.
+            theory_task = next((t for t in pipeline.tasks if t.name == "theory"), None)
+            writer_task = next((t for t in pipeline.tasks if t.name == "writer"), None)
+            if any(t is not None and t.status == TaskStatus.IN_PROGRESS
+                   for t in (theory_task, writer_task)):
+                self._send_json(
+                    {"error": "A rewrite is already in progress"},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
+            # Gate-live path: live orchestrator is still waiting on paper_qa_gate.
+            paper_qa_task = next(
+                (t for t in pipeline.tasks if t.name == "paper_qa_gate"), None
+            )
+            if paper_qa_task is not None and paper_qa_task.status == TaskStatus.AWAITING_GATE:
+                from eurekaclaw.ui import review_gate
+                from eurekaclaw.ui.review_gate import PaperQADecision
+                review_gate.submit_paper_qa(
+                    run.eureka_session_id,
+                    PaperQADecision(action="rewrite", question=prompt),
+                )
+                self._send_json(
+                    {"ok": True, "mode": "gate"},
+                    status=HTTPStatus.ACCEPTED,
+                )
+                return
+
+            # Background path: orchestrator is idle/completed. Spawn a thread.
+            rewrite_id = str(uuid.uuid4())
+            thread = threading.Thread(
+                target=_run_rewrite_bg,
+                args=(run, bus, pipeline, brief, prompt, rewrite_id),
+                daemon=True,
+            )
+            thread.start()
+            self._send_json(
+                {"ok": True, "mode": "bg", "rewrite_id": rewrite_id},
+                status=HTTPStatus.ACCEPTED,
+            )
             return
 
         # ── Historical review activation ──────────────────────────────────
