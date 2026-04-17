@@ -192,6 +192,7 @@ export function PaperPanel({ run }: PaperPanelProps) {
     <div className="paper-review-panel">
       <div style={{ flex: '0 0 58%', minWidth: 0, display: 'flex' }}>
         <PaperViewer
+          key={run.run_id}
           run={run}
           paperVersion={paperVersion}
           isRewriting={isRewriting}

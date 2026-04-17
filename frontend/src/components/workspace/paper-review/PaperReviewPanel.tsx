@@ -129,6 +129,7 @@ export function PaperReviewPanel({ run }: PaperReviewPanelProps) {
     >
       <div style={{ flex: `0 0 ${splitPct}%`, minWidth: 0, display: 'flex' }}>
         <PaperViewer
+          key={run.run_id}
           run={run}
           paperVersion={paperVersion}
           isRewriting={isRewriting}
