@@ -56,8 +56,9 @@ def test_writer_output_key_naming_uses_paper_version(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_review_rewrite_endpoint_bumps_paper_version(tmp_path, monkeypatch):
-    """POST /review/rewrite → success → writer.outputs.paper_version bumps."""
+async def test_bump_writer_paper_version_bumps_existing_field(tmp_path, monkeypatch):
+    """`_bump_writer_paper_version` (called on a successful /rewrite bg run)
+    reads the writer's current paper_version and increments it in place."""
     from eurekaclaw.knowledge_bus.bus import KnowledgeBus
     from eurekaclaw.types.tasks import Task, TaskPipeline, TaskStatus
     from eurekaclaw.types.artifacts import ResearchBrief
