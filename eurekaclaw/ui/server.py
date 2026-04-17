@@ -2042,6 +2042,8 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 self._send_json({"error": "No revision_prompt provided"}, status=HTTPStatus.BAD_REQUEST)
                 return
 
+            self._append_paper_qa_rewrite_marker(session_id, revision_prompt)
+
             import asyncio as _asyncio
             from eurekaclaw.orchestrator.meta_orchestrator import MetaOrchestrator
             from eurekaclaw.orchestrator.paper_qa_handler import PaperQAHandler
@@ -2256,6 +2258,8 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 from eurekaclaw.ui.review_gate import PaperQADecision
                 action = str(payload.get("action", "no")).strip()
                 question = str(payload.get("question", "")).strip()
+                if action == "rewrite":
+                    self._append_paper_qa_rewrite_marker(session_id, question)
                 ok = _rg.submit_paper_qa(session_id, PaperQADecision(action=action, question=question))
             else:
                 self._send_json({"error": f"Unknown gate type: {gate_type}"}, status=HTTPStatus.BAD_REQUEST)
@@ -2306,6 +2310,27 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
         if not body:
             return {}
         return json.loads(body.decode("utf-8"))
+
+    def _append_paper_qa_rewrite_marker(self, session_id: str, prompt: str) -> None:
+        """Persist a "↻ Rewrite requested" line to paper_qa_history.jsonl so
+        the marker survives page reloads (frontend-only optimistic state
+        would otherwise disappear on refresh)."""
+        if not session_id or not prompt:
+            return
+        from datetime import datetime as _dt, timezone as _tz
+        history_dir = settings.runs_dir / session_id
+        try:
+            history_dir.mkdir(parents=True, exist_ok=True)
+            history_file = history_dir / "paper_qa_history.jsonl"
+            entry = {
+                "role": "system",
+                "content": f'↻ Rewrite requested: "{prompt}"',
+                "ts": _dt.now(_tz.utc).isoformat(),
+            }
+            with history_file.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            logger.warning("Could not append rewrite marker for %s", session_id, exc_info=True)
 
     def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
         data = json.dumps(payload).encode("utf-8")

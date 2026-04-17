@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { apiGet, apiPost } from '@/api/client';
-import { useUiStore } from '@/store/uiStore';
 import { PaperViewer } from './PaperViewer';
 import { QAChat } from './QAChat';
 import type { SessionRun, QAMessage } from '@/types';
@@ -31,6 +30,11 @@ export function PaperReviewPanel({ run }: PaperReviewPanelProps) {
   const [splitPct, setSplitPct] = useState(loadInitialSplit);
   const [isDragging, setIsDragging] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Mirror splitPct into a ref so the drag effect can persist the final
+  // value on mouseup without depending on splitPct (which would
+  // re-register document listeners on every mousemove).
+  const splitPctRef = useRef(splitPct);
+  splitPctRef.current = splitPct;
 
   // Determine rewrite state from pipeline
   const theoryTask = run.pipeline?.find((t) => t.name === 'theory');
@@ -50,7 +54,6 @@ export function PaperReviewPanel({ run }: PaperReviewPanelProps) {
   ).length;
   const paperVersion = 1 + rewriteCount;
 
-  const setReviewSessionId = useUiStore((s) => s.setReviewSessionId);
   const paperQATask = run.pipeline?.find((t) => t.name === 'paper_qa_gate');
   const isHistorical = !paperQATask || paperQATask.status !== 'awaiting_gate';
 
@@ -66,18 +69,17 @@ export function PaperReviewPanel({ run }: PaperReviewPanelProps) {
     })();
   }, [run.run_id]);
 
-  // Accept paper
+  // Accept paper — this panel is only mounted during an active gate or
+  // live rewrite (see WorkspaceTabs), so isHistorical should always be
+  // false here. The guard is defensive.
   const handleAccept = useCallback(async () => {
-    if (isHistorical) {
-      setReviewSessionId(null);
-      return;
-    }
+    if (isHistorical) return;
     try {
       await apiPost(`/api/runs/${run.run_id}/gate/paper_qa`, { action: 'no', question: '' });
     } catch (e) {
       alert(`Could not accept paper: ${(e as Error).message}`);
     }
-  }, [run.run_id, isHistorical, setReviewSessionId]);
+  }, [run.run_id, isHistorical]);
 
   // Rewrite paper
   const handleRewrite = useCallback(async (prompt: string) => {
@@ -116,7 +118,7 @@ export function PaperReviewPanel({ run }: PaperReviewPanelProps) {
 
     function onMouseUp() {
       setIsDragging(false);
-      localStorage.setItem(SPLIT_KEY, String(splitPct));
+      localStorage.setItem(SPLIT_KEY, String(splitPctRef.current));
     }
 
     document.addEventListener('mousemove', onMouseMove);
@@ -125,7 +127,7 @@ export function PaperReviewPanel({ run }: PaperReviewPanelProps) {
       document.removeEventListener('mousemove', onMouseMove);
       document.removeEventListener('mouseup', onMouseUp);
     };
-  }, [isDragging, splitPct]);
+  }, [isDragging]);
 
   return (
     <div

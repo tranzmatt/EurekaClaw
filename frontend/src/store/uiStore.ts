@@ -31,8 +31,6 @@ interface UiState {
   openAgentDrawerRole: string | null;
   currentWizardStep: number;
   isFlashing: boolean;
-  reviewSessionId: string | null;
-  setReviewSessionId: (id: string | null) => void;
 
   setActiveView: (view: ActiveView) => void;
   setActiveWsTab: (tab: ActiveWsTab) => void;
@@ -49,8 +47,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   openAgentDrawerRole: null,
   currentWizardStep: 0,
   isFlashing: false,
-  reviewSessionId: null,
-  setReviewSessionId: (id) => set({ reviewSessionId: id }),
 
   setActiveView: (view) => { set({ activeView: view }); persistUi(view, get().activeWsTab); },
   setActiveWsTab: (tab) => { set({ activeWsTab: tab }); persistUi(get().activeView, tab); },

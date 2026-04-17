@@ -64,9 +64,12 @@ export function PaperPanel({ run }: PaperPanelProps) {
   // Handle rewrite — calls theory + writer, then reloads the paper
   const handleRewrite = useCallback(async (prompt: string) => {
     if (!run?.run_id) return;
+    // Use "Rewrite requested" to match what the backend persists to
+    // paper_qa_history.jsonl, so the optimistic entry lines up with
+    // the canonical entry after a reload.
     const sysMsg: QAMessage = {
       role: 'system',
-      content: `↻ Revision requested: "${prompt}"`,
+      content: `↻ Rewrite requested: "${prompt}"`,
       ts: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, sysMsg]);
