@@ -1599,10 +1599,13 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             if _art_filename not in _allowed:
                 self._send_json({"error": "File not found"}, status=HTTPStatus.NOT_FOUND)
                 return
-            # Always sync the latest paper.tex from memory so downloads
-            # and PDF iframe embeds reflect the current version (not a
-            # stale copy from before a rewrite).
-            if _art_filename in ("paper.tex", "paper.pdf"):
+            # Sync the latest paper.tex from memory so .tex downloads
+            # reflect any edits made since save_artifacts last ran.
+            # Never touch paper.pdf here — compile-pdf owns the PDF
+            # lifecycle. Deleting the PDF from a GET handler races the
+            # iframe load and is what caused "Failed to load PDF
+            # document." after a successful compile.
+            if _art_filename == "paper.tex":
                 _session = _art_run.eureka_session
                 _bus = _session.bus if _session else None
                 if _bus:
@@ -1614,14 +1617,9 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                             if _latex:
                                 _tex = Path(_art_run.output_dir) / "paper.tex"
                                 _tex.parent.mkdir(parents=True, exist_ok=True)
-                                # Only rewrite if content changed
                                 _old = _tex.read_text(encoding="utf-8") if _tex.is_file() else ""
                                 if _latex != _old:
                                     _tex.write_text(_latex, encoding="utf-8")
-                                    # Invalidate stale PDF when .tex changes
-                                    _stale_pdf = Path(_art_run.output_dir) / "paper.pdf"
-                                    if _stale_pdf.is_file():
-                                        _stale_pdf.unlink()
             if not _art_path.is_file():
                 self._send_json({"error": "File not found"}, status=HTTPStatus.NOT_FOUND)
                 return
