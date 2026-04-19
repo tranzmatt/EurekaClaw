@@ -4938,6 +4938,7 @@ textarea {
 .ws-panel.is-visible {
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 /* ── Live activity area ──────────────────────────────────────────────────── */

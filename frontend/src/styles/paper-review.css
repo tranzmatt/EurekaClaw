@@ -2,7 +2,7 @@
 
 .paper-review-panel {
   display: flex;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   background: var(--bg);
   gap: 1px;
@@ -260,10 +260,34 @@
   flex: 1;
   padding: 20px;
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong, var(--line)) transparent;
+}
+
+.qa-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.qa-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.qa-messages::-webkit-scrollbar-thumb {
+  background: var(--line-strong, var(--line));
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.qa-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--muted, var(--line-strong));
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
 .qa-empty-state {
