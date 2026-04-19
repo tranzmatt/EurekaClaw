@@ -68,6 +68,11 @@ export function usePolling() {
         const prevReviewGateTask = prev?.pipeline?.find((t) => t.name === 'theory_review_gate');
         const gateJustActivated = prevReviewGateTask?.status !== 'awaiting_gate' && reviewGateTask?.status === 'awaiting_gate';
         if (gateJustActivated) setActiveWsTab('proof');
+        // Auto-switch when paper QA gate activates (panel takes over workspace)
+        const paperQAGateTask = current.pipeline?.find((t) => t.name === 'paper_qa_gate');
+        const prevPaperQAGateTask = prev?.pipeline?.find((t) => t.name === 'paper_qa_gate');
+        const paperGateJustActivated = prevPaperQAGateTask?.status !== 'awaiting_gate' && paperQAGateTask?.status === 'awaiting_gate';
+        if (paperGateJustActivated) setActiveWsTab('paper');
         if (prev?.status !== 'completed' && current.status === 'completed' && activeWsTab === 'live') {
           setActiveWsTab('paper');
         }

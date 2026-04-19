@@ -51,7 +51,7 @@ class MetaOrchestrator:
     ) -> None:
         self.bus = bus
         self.client: LLMClient = client or create_client()
-        self.tool_registry = tool_registry or build_default_registry()
+        self.tool_registry = tool_registry or build_default_registry(bus=bus)
         self.skill_registry = skill_registry or SkillRegistry()
         self.domain_plugin = domain_plugin
 
@@ -215,6 +215,8 @@ class MetaOrchestrator:
 
             # Execute orchestrator tasks (no agent needed)
             if task.agent_role == "orchestrator":
+                if task.name == "paper_qa_gate":
+                    await self._handle_paper_qa_gate(pipeline, brief)
                 task.mark_completed()
                 continue
 
@@ -705,6 +707,30 @@ class MetaOrchestrator:
             if dep.status != TaskStatus.COMPLETED:
                 return False
         return True
+
+    async def _handle_paper_qa_gate(self, pipeline: TaskPipeline, brief: ResearchBrief) -> None:
+        """After writer completes, offer the user a chance to review the paper.
+
+        Delegates to PaperQAHandler which manages:
+        - CLI y/N prompt (default skip)
+        - Multi-turn QA with tool-equipped PaperQAAgent
+        - Unlimited rewrite cycles (theory + writer re-run)
+        - Paper versioning and QA history persistence
+        - Graceful failure recovery with rollback
+        """
+        from eurekaclaw.orchestrator.paper_qa_handler import PaperQAHandler
+
+        handler = PaperQAHandler(
+            bus=self.bus,
+            agents=self.agents,
+            router=self.router,
+            client=self.client,
+            tool_registry=self.tool_registry,
+            skill_injector=self.skill_injector,
+            memory=self.memory,
+            gate_controller=self.gate,
+        )
+        await handler.run(pipeline, brief)
 
     def _collect_outputs(self, brief: ResearchBrief) -> ResearchOutput:
         import json

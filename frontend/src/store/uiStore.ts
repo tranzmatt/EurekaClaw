@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 type ActiveView = 'workspace' | 'skills' | 'systems' | 'onboarding';
-type ActiveWsTab = 'live' | 'proof' | 'paper' | 'logs';
+type ActiveWsTab = 'live' | 'proof' | 'paper';
 
 const STORAGE_KEY = 'eurekaclaw_ui';
 
@@ -11,7 +11,7 @@ function loadPersistedUi(): { activeView: ActiveView; activeWsTab: ActiveWsTab }
     if (raw) {
       const parsed = JSON.parse(raw);
       const validViews: ActiveView[] = ['workspace', 'skills', 'systems', 'onboarding'];
-      const validTabs: ActiveWsTab[] = ['live', 'proof', 'paper', 'logs'];
+      const validTabs: ActiveWsTab[] = ['live', 'proof', 'paper'];
       return {
         activeView: validViews.includes(parsed.activeView) ? parsed.activeView : 'onboarding',
         activeWsTab: validTabs.includes(parsed.activeWsTab) ? parsed.activeWsTab : 'live',

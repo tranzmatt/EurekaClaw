@@ -181,6 +181,24 @@ export interface Artifacts {
   theory_state?: TheoryState;
   experiment_result?: ExperimentResult;
   resource_analysis?: Record<string, unknown> | null;
+  paper_qa_answer?: string | null;
+  paper_qa_history?: QAMessage[];
+}
+
+// ── Paper QA ─────────────────────────────────────────────────────────────────
+
+export interface ToolStep {
+  tool: string;
+  input: string;
+  status: 'pending' | 'running' | 'done' | 'failed';
+}
+
+export interface QAMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  ts?: string;
+  version?: number;
+  tool_steps?: ToolStep[];
 }
 
 // ── InputSpec ─────────────────────────────────────────────────────────────────

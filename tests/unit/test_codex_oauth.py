@@ -226,8 +226,8 @@ class TestCodexManager:
         assert tokens is not None
         assert tokens["access_token"] == "sk-from-cli"
 
-    def test_load_valid_tokens_prefers_eurekaclaw_store(self, tmp_path):
-        """EurekaClaw's own store takes priority over Codex CLI file."""
+    def test_load_valid_tokens_prefers_codex_cli(self, tmp_path):
+        """Codex CLI file takes priority over EurekaClaw's own store."""
         from eurekaclaw.codex_manager import _load_valid_tokens
         from eurekaclaw.auth import token_store
 
@@ -253,7 +253,7 @@ class TestCodexManager:
             tokens = _load_valid_tokens()
 
         assert tokens is not None
-        assert tokens["access_token"] == "sk-from-store"
+        assert tokens["access_token"] == "sk-from-cli"
 
     def test_load_valid_tokens_none_when_no_credentials(self, tmp_path):
         """Returns None when neither store nor CLI file exists."""

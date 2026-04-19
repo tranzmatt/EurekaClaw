@@ -65,7 +65,7 @@ def _read_codex_cli_tokens() -> dict[str, Any] | None:
         "access_token": tokens["access_token"],
         "refresh_token": tokens.get("refresh_token", ""),
         "id_token": tokens.get("id_token", ""),
-        "account_id": tokens.get("account_id", ""),
+        "account_id": tokens.get("account_id", "") or raw.get("account_id", ""),
         "auth_mode": raw.get("auth_mode", "chatgpt"),
         "last_refresh": raw.get("last_refresh", ""),
         # No expires_in in Codex CLI format — token_store.is_token_expired
@@ -114,15 +114,48 @@ def _load_valid_tokens() -> dict[str, Any] | None:
 # =============================================================================
 
 
+_OAUTH_INJECTED_KEY: str | None = None
+_PRE_OAUTH_API_KEY: str | None = None  # Value before OAuth overwrote it
+
+
 def setup_codex_env(access_token: str, account_id: str = "") -> None:
     """Inject the Codex access token into the environment.
 
-    The OpenAICompatAdapter reads ``OPENAI_COMPAT_API_KEY`` (and the base URL),
-    so no code changes are needed in the adapter itself.
+    Saves any pre-existing OPENAI_COMPAT_API_KEY so it can be restored
+    when OAuth credentials are cleared.
     """
+    global _OAUTH_INJECTED_KEY, _PRE_OAUTH_API_KEY  # noqa: PLW0603
+    # Only snapshot the pre-existing value on the first OAuth injection
+    if _OAUTH_INJECTED_KEY is None:
+        _PRE_OAUTH_API_KEY = os.environ.get("OPENAI_COMPAT_API_KEY")
     os.environ["OPENAI_COMPAT_API_KEY"] = access_token
+    _OAUTH_INJECTED_KEY = access_token
     if account_id:
         os.environ["CODEX_ACCOUNT_ID"] = account_id
+    else:
+        os.environ.pop("CODEX_ACCOUNT_ID", None)
+
+
+def clear_oauth_env() -> None:
+    """Remove OAuth-injected env vars, restoring any pre-existing API key.
+
+    Only touches OPENAI_COMPAT_API_KEY if the current value is the exact
+    token we injected. If the user overwrote it after OAuth setup, the
+    user's value is preserved. If there was a pre-existing key before
+    OAuth, it is restored.
+    """
+    global _OAUTH_INJECTED_KEY, _PRE_OAUTH_API_KEY  # noqa: PLW0603
+    os.environ.pop("CODEX_ACCOUNT_ID", None)
+    if (
+        _OAUTH_INJECTED_KEY is not None
+        and os.environ.get("OPENAI_COMPAT_API_KEY") == _OAUTH_INJECTED_KEY
+    ):
+        if _PRE_OAUTH_API_KEY is not None:
+            os.environ["OPENAI_COMPAT_API_KEY"] = _PRE_OAUTH_API_KEY
+        else:
+            os.environ.pop("OPENAI_COMPAT_API_KEY", None)
+    _OAUTH_INJECTED_KEY = None
+    _PRE_OAUTH_API_KEY = None
 
 
 # =============================================================================

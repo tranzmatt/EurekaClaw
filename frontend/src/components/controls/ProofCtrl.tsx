@@ -14,12 +14,12 @@ interface ProofCtrlProps {
   onRestartFast: () => void;
 }
 
-const RUNNING_LABELS: Record<string, { label: string; sub: string }> = {
-  survey:     { label: 'Reading papers', sub: 'Searching the literature — pause will queue for the proof stage' },
-  ideation:   { label: 'Generating ideas', sub: 'Exploring hypotheses — pause will queue for the proof stage' },
-  theory:     { label: 'Proving the theorem', sub: 'Pause will stop safely at the next proof checkpoint' },
-  experiment: { label: 'Running experiments', sub: 'Validating the theory numerically' },
-  writer:     { label: 'Writing the paper', sub: 'Assembling your LaTeX paper' },
+const RUNNING_LABELS: Record<string, string> = {
+  survey:     'Reading papers',
+  ideation:   'Generating ideas',
+  theory:     'Proving the theorem',
+  experiment: 'Running experiments',
+  writer:     'Writing the paper',
 };
 
 export function ProofCtrl({ run, onRestartFast }: ProofCtrlProps) {
@@ -41,7 +41,7 @@ export function ProofCtrl({ run, onRestartFast }: ProofCtrlProps) {
 
   const pipeline = run.pipeline ?? [];
   const activeOuter = getActiveOuterStage(pipeline);
-  const runningInfo = RUNNING_LABELS[activeOuter ?? ''] ?? { label: 'Research in progress', sub: 'EurekaClaw is thinking…' };
+  const runningLabel = RUNNING_LABELS[activeOuter ?? ''] ?? 'Research in progress';
   const pauseDisabled = activeOuter === 'experiment' || activeOuter === 'writer';
 
   const handlePause = async () => {
@@ -81,40 +81,39 @@ export function ProofCtrl({ run, onRestartFast }: ProofCtrlProps) {
     ? `Paused while ${friendlyInnerStage(run.paused_stage) ?? humanize(run.paused_stage)}`
     : 'Ready to continue whenever you are';
 
+  const hintText = pauseDisabled
+    ? 'pause unavailable at this stage'
+    : activeOuter === 'theory'
+    ? 'progress saves at the next checkpoint'
+    : 'pause takes effect once theorem-proving begins';
+
   return (
     <div className="proof-ctrl" id="proof-ctrl">
-      <StageTrack run={run} />
+      {/* Top band: pipeline icons + pause pill inline, one breath */}
+      <div className="proof-ctrl-top">
+        <StageTrack run={run} />
+        {isRunning && !isPausing && (
+          <button
+            className="proof-ctrl-pause-btn"
+            id="pause-session-btn"
+            aria-label="Pause research at the next safe checkpoint"
+            title={hintText}
+            disabled={pauseDisabled}
+            onClick={() => void handlePause()}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1.5"/><rect x="14" y="4" width="4" height="16" rx="1.5"/></svg>
+            <span>Take a break</span>
+          </button>
+        )}
+      </div>
 
-      {/* State 1: Running */}
+      {/* Running footer: single inline status line, no separate card */}
       {isRunning && !isPausing && (
-        <div className="proof-ctrl-state" id="proof-ctrl-running">
-          <div className="proof-ctrl-running-body">
-            <div className="proof-ctrl-running-left">
-              <span className="proof-ctrl-live-dot" aria-hidden="true" />
-              <div>
-                <span className="proof-ctrl-live-label" id="proof-ctrl-live-label">{runningInfo.label}</span>
-                <span className="proof-ctrl-live-sub" id="proof-ctrl-live-sub">{runningInfo.sub}</span>
-              </div>
-            </div>
-            <button
-              className="proof-ctrl-pause-btn"
-              id="pause-session-btn"
-              aria-label="Pause research at the next safe checkpoint"
-              disabled={pauseDisabled}
-              style={pauseDisabled ? { opacity: 0.4 } : undefined}
-              onClick={() => void handlePause()}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1.5"/><rect x="14" y="4" width="4" height="16" rx="1.5"/></svg>
-              <span>Take a break</span>
-            </button>
-          </div>
-          <p className="proof-ctrl-running-hint" id="proof-ctrl-running-hint">
-            {pauseDisabled
-              ? 'The theorem proof is complete. Pause is not available at this stage.'
-              : activeOuter === 'theory'
-              ? 'Your progress is safe — EurekaClaw will stop at the next natural checkpoint.'
-              : 'Pause will take effect when theorem-proving begins.'}
-          </p>
+        <div className="proof-ctrl-running-footer" id="proof-ctrl-running">
+          <span className="proof-ctrl-live-dot" aria-hidden="true" />
+          <span className="proof-ctrl-live-label" id="proof-ctrl-live-label">{runningLabel}</span>
+          <span className="proof-ctrl-live-sep" aria-hidden="true">·</span>
+          <span className="proof-ctrl-live-hint" id="proof-ctrl-running-hint">{hintText}</span>
         </div>
       )}
 

@@ -1,26 +1,62 @@
+@import './paper-review.css';
+
+/* ============================================
+   Bundled fonts — Inter (UI) + JetBrains Mono (code/terminal)
+   Files live in frontend/public/fonts/ and are served at /fonts/*
+   Both under SIL OFL 1.1 — see fonts/Inter-OFL.txt and fonts/JetBrainsMono-OFL.txt
+   ============================================ */
+
+@font-face {
+  font-family: 'Inter';
+  src: url('/fonts/InterVariable.woff2') format('woff2-variations');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
-  --bg: #f7f5ef;
-  --bg-soft: #fbfaf6;
-  --surface: rgba(255, 253, 248, 0.84);
-  --surface-strong: #fffdf9;
-  --surface-cool: rgba(241, 246, 251, 0.82);
-  --line: rgba(27, 63, 104, 0.12);
-  --line-strong: rgba(18, 84, 150, 0.2);
-  --text: #1d2736;
-  --muted: #5f6b7a;
-  --primary: #0f6ab8;
-  --primary-strong: #0b4f8a;
-  --primary-soft: #dceafb;
-  --accent: #b9783b;
-  --accent-soft: #ead2bb;
-  --ok: #547765;
-  --warn: #9b6b30;
-  --idle: #6e7784;
-  --shadow: 0 22px 48px rgba(18, 37, 66, 0.08);
-  --radius-xl: 28px;
-  --radius-lg: 20px;
-  --radius-md: 14px;
-  --sidebar-width: 290px;
+  --bg: #f5f7fa;
+  --bg-soft: #fafbfd;
+  --surface: rgba(255, 255, 255, 0.85);
+  --surface-strong: #ffffff;
+  --surface-cool: rgba(237, 244, 252, 0.85);
+  --line: rgba(15, 60, 120, 0.08);
+  --line-strong: rgba(15, 60, 120, 0.15);
+  --text: #1a2332;
+  --muted: #5c6b7f;
+  --dim: #a0aab8;
+  --primary: #0a6dc4;
+  --primary-strong: #085a9e;
+  --primary-soft: #dfeaf8;
+  --accent: #b87333;
+  --accent-soft: #f0e0d0;
+  --ok: #2d8659;
+  --warn: #c47f17;
+  --idle: #7d8694;
+  --mono: 'JetBrains Mono', ui-monospace, "SF Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+  --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.10);
+  --radius-xl: 20px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+  --sidebar-width: 280px;
 }
 
 * {
@@ -33,16 +69,15 @@ html {
 
 body {
   margin: 0;
-  font-family: "Space Grotesk", sans-serif;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
   color: var(--text);
-  background:
-    linear-gradient(rgba(31, 98, 171, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(31, 98, 171, 0.045) 1px, transparent 1px),
-    radial-gradient(circle at top left, rgba(185, 120, 59, 0.12), transparent 18rem),
-    radial-gradient(circle at right 18%, rgba(15, 106, 184, 0.14), transparent 22rem),
-    linear-gradient(180deg, #fbfaf6 0%, #f4f2eb 100%);
-  background-size: 46px 46px, 46px 46px, auto, auto, auto;
+  background: var(--bg);
   min-height: 100vh;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  letter-spacing: -0.01em;
 }
 
 button,
@@ -312,6 +347,15 @@ img {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   line-height: 1.4;
+  max-height: 2.8em;
+  transition: max-height 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.session-item:hover .session-item-name,
+.session-item:hover .session-item-prompt {
+  -webkit-line-clamp: unset;
+  max-height: 40em;
+  word-break: break-word;
 }
 
 /* Session item actions group (rename + restart + delete) */
@@ -939,7 +983,7 @@ img {
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.8);
   font-size: 0.84rem;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   color: var(--text);
   transition: border-color 160ms ease;
 }
@@ -1261,13 +1305,13 @@ textarea {
 }
 
 .token-value {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-weight: 600;
   color: var(--primary-strong);
 }
 
 .token-breakdown {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   color: var(--muted);
   font-size: 0.88rem;
 }
@@ -1287,7 +1331,7 @@ textarea {
 
 .mono-label,
 .step-index {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
 }
 
 .pipeline-list,
@@ -1464,7 +1508,7 @@ textarea {
   align-items: center;
   padding: 2px 10px;
   border-radius: 12px;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.72rem;
   font-weight: 600;
   letter-spacing: 0.03em;
@@ -1502,7 +1546,7 @@ textarea {
   display: inline-flex;
   gap: 8px;
   font-size: 0.78rem;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
 }
 
 .paper-stat {
@@ -1525,7 +1569,7 @@ textarea {
 }
 
 .paper-output-dir code {
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.68rem;
   background: rgba(0, 0, 0, 0.04);
   padding: 2px 6px;
@@ -1655,7 +1699,7 @@ textarea {
   font-size: 0.72rem;
   font-weight: 400;
   color: var(--muted);
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
 }
 
 .paper-latex-viewer {
@@ -1697,7 +1741,7 @@ textarea {
 .paper-latex-code {
   margin: 0;
   padding: 16px 18px;
-  font-family: "Fira Code", "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.78rem;
   line-height: 1.55;
   color: #d4d8e0;
@@ -1891,7 +1935,7 @@ textarea {
 
 .wizard-item-code {
   display: block;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.78rem;
   background: rgba(18, 37, 66, 0.05);
   border: 1px solid var(--line);
@@ -2487,7 +2531,7 @@ textarea {
   border-radius: 10px;
   background: rgba(24, 36, 49, 0.92);
   color: #f4efe6;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.82rem;
   overflow-x: auto;
 }
@@ -2806,7 +2850,7 @@ textarea {
   color: var(--muted);
   cursor: pointer;
   transition: all 160ms ease;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   letter-spacing: -0.01em;
 }
 
@@ -3080,7 +3124,7 @@ textarea {
   background: rgba(24, 36, 49, 0.92);
   color: #f4efe6;
   overflow-x: auto;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.86rem;
 }
 
@@ -3202,7 +3246,7 @@ textarea {
   background: rgba(24, 36, 49, 0.94);
   color: #f4efe6;
   overflow: auto;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.84rem;
   line-height: 1.6;
 }
@@ -3407,7 +3451,7 @@ textarea {
   margin-top: 0;
   border-radius: 14px;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.72);
   backdrop-filter: blur(8px);
   box-shadow: 0 2px 12px rgba(18, 37, 66, 0.06);
   overflow: hidden;
@@ -3418,16 +3462,25 @@ textarea {
   padding: 14px 16px;
 }
 
+/* ── Top band: stage icons + pause pill, same row ──────────────────────────── */
+
+.proof-ctrl-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 12px 16px;
+  background: rgba(248, 250, 252, 0.55);
+}
+
 /* ── Pipeline stage track ──────────────────────────────────────────────────── */
 
 .proof-ctrl-track {
+  flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 0;
-  padding: 12px 16px 10px;
-  border-bottom: 1px solid var(--line);
-  background: rgba(248, 250, 252, 0.6);
 }
 
 .proof-ctrl-track-stage {
@@ -3547,25 +3600,20 @@ textarea {
   border-top-color: #009650;
 }
 
-/* ── Running state ───────────────────────────────────────────────────────────  */
+/* ── Running state: single inline footer, no separate card ─────────────────── */
 
-.proof-ctrl-running-body {
+.proof-ctrl-running-footer {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.proof-ctrl-running-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+  gap: 7px;
+  padding: 9px 16px 11px;
+  line-height: 1.4;
+  min-width: 0;
 }
 
 .proof-ctrl-live-dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   background: var(--accent);
   flex-shrink: 0;
@@ -3573,45 +3621,56 @@ textarea {
 }
 
 @keyframes live-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 113, 227, 0.5); opacity: 1; }
-  50%       { box-shadow: 0 0 0 5px rgba(0, 113, 227, 0); opacity: 0.85; }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(0, 113, 227, 0.45); opacity: 1; }
+  50%       { box-shadow: 0 0 0 4px rgba(0, 113, 227, 0); opacity: 0.85; }
 }
 
 .proof-ctrl-live-label {
-  display: block;
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--text);
+  letter-spacing: -0.003em;
+  white-space: nowrap;
 }
 
-.proof-ctrl-live-sub {
-  display: block;
-  font-size: 0.74rem;
+.proof-ctrl-live-sep {
+  color: var(--line-strong);
+  font-weight: 400;
+  flex-shrink: 0;
+}
+
+.proof-ctrl-live-hint {
+  font-size: 0.76rem;
   color: var(--muted);
-  margin-top: 1px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Pause button — calm, reassuring amber-warm pill */
+/* Pause pill — sits on the stage row, calm amber warmth */
 .proof-ctrl-pause-btn {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 9px 18px;
+  gap: 6px;
+  padding: 6px 13px;
   border-radius: 999px;
-  font-size: 0.81rem;
+  font-size: 0.76rem;
   font-weight: 600;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.005em;
   color: #7a4e00;
-  background: rgba(181, 100, 0, 0.09);
-  border: 1.5px solid rgba(181, 100, 0, 0.22);
-  transition: background 160ms ease, box-shadow 160ms ease, transform 120ms ease;
+  background: rgba(181, 100, 0, 0.07);
+  border: 1px solid rgba(181, 100, 0, 0.18);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
   white-space: nowrap;
   flex-shrink: 0;
 }
 
 .proof-ctrl-pause-btn:hover:not(:disabled) {
-  background: rgba(181, 100, 0, 0.15);
-  box-shadow: 0 4px 14px rgba(181, 100, 0, 0.16);
+  background: rgba(181, 100, 0, 0.13);
+  border-color: rgba(181, 100, 0, 0.3);
+  box-shadow: 0 3px 10px rgba(181, 100, 0, 0.14);
   transform: translateY(-1px);
 }
 
@@ -3623,13 +3682,6 @@ textarea {
 .proof-ctrl-pause-btn:disabled {
   opacity: 0.38;
   cursor: not-allowed;
-}
-
-.proof-ctrl-running-hint {
-  font-size: 0.73rem;
-  color: var(--muted);
-  margin: 6px 0 0 0;
-  line-height: 1.45;
 }
 
 /* ── Transition bars (pausing / resuming) ──────────────────────────────────── */
@@ -3782,7 +3834,7 @@ textarea {
 
 /* Session ID chip */
 .proof-ctrl-session-id {
-  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-family: var(--mono);
   font-size: 0.68rem;
   color: var(--muted);
   background: rgba(100, 116, 139, 0.07);
@@ -3833,51 +3885,116 @@ textarea {
 /* ── Failed session immutable note — Claude Code style ──────────────────── */
 
 .failed-session-note {
-  margin-top: 12px;
-  border-radius: var(--radius-md);
-  background: rgba(255, 253, 252, 0.9);
-  border: 1px solid rgba(159, 47, 47, 0.18);
-  border-left: 3px solid #c0392b;
+  margin-top: 14px;
+  border-radius: 14px;
   overflow: hidden;
+  border: 1px solid rgba(230, 160, 50, 0.18);
+  background: linear-gradient(180deg, rgba(255, 247, 233, 0.55) 0%, rgba(255, 253, 252, 0.95) 100%);
+  box-shadow: 0 1px 2px rgba(120, 75, 20, 0.04);
+}
+
+.failed-session-note.is-fatal {
+  border-color: rgba(192, 57, 43, 0.16);
+  background: linear-gradient(180deg, rgba(255, 240, 238, 0.55) 0%, rgba(255, 253, 252, 0.95) 100%);
 }
 
 .failed-session-note-header {
   display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 10px 14px 8px;
-  border-bottom: 1px solid rgba(159, 47, 47, 0.1);
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px 10px;
 }
 
-.failed-session-note-header > svg {
+.failed-session-note-icon {
   flex-shrink: 0;
-  color: #c0392b;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(230, 160, 50, 0.14);
+  color: #b17820;
+}
+
+.failed-session-note.is-fatal .failed-session-note-icon {
+  background: rgba(192, 57, 43, 0.10);
+  color: #a43425;
+}
+
+.failed-session-note-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
 }
 
 .failed-session-note-title {
-  font-size: 0.80rem;
+  font-size: 0.86rem;
   font-weight: 600;
-  color: #8b2020;
-  flex: 1;
+  color: #4b2f10;
+  letter-spacing: -0.005em;
 }
 
+.failed-session-note.is-fatal .failed-session-note-title {
+  color: #6d1f14;
+}
 
-.failed-session-note-body {
-  margin: 0;
-  padding: 9px 14px;
-  font-size: 0.78rem;
+.failed-session-note-subtitle {
+  font-size: 0.77rem;
   color: var(--muted);
-  line-height: 1.55;
+  line-height: 1.45;
 }
 
-.failed-session-note-error {
+.failed-session-note-error-details {
+  margin: 2px 16px 10px;
+  border-radius: 9px;
+  background: rgba(86, 102, 125, 0.05);
+  border: 1px solid rgba(86, 102, 125, 0.12);
+  overflow: hidden;
+}
+
+.failed-session-note-error-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 0.73rem;
+  color: var(--muted);
+  transition: background 0.12s, color 0.12s;
+  user-select: none;
+}
+
+.failed-session-note-error-summary::-webkit-details-marker { display: none; }
+
+.failed-session-note-error-summary:hover {
+  color: var(--text);
+  background: rgba(86, 102, 125, 0.06);
+}
+
+.failed-session-note-error-summary svg {
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+.failed-session-note-error-details[open] .failed-session-note-error-summary svg {
+  transform: rotate(180deg);
+}
+
+.failed-session-note-error-text {
   margin: 0;
-  padding: 0 14px 10px;
-  font-family: "IBM Plex Mono", monospace;
+  padding: 8px 12px 10px;
+  font-family: var(--mono);
   font-size: 0.72rem;
-  color: #9f2f2f;
+  color: #8b2d26;
   line-height: 1.5;
   word-break: break-word;
+  white-space: pre-wrap;
+  border-top: 1px solid rgba(86, 102, 125, 0.10);
+  background: rgba(255, 255, 255, 0.6);
 }
 
 /* ── Wizard skip row ────────────────────────────────────────────────────── */
@@ -3952,7 +4069,7 @@ textarea {
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   line-height: 1.4;
 }
 
@@ -4171,43 +4288,57 @@ textarea {
   min-height: 0;
 }
 
-/* ── Session top bar: name + rename + status ── */
+/* ── Session top bar: question title + compact identity footer ── */
 
 .session-topbar {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 16px;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
 
 .session-topbar-identity {
   display: flex;
-  align-items: center;
-  gap: 7px;
+  align-items: flex-start;
+  gap: 6px;
   min-width: 0;
-  flex: 1;
 }
 
 .session-topbar-name {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
   font-size: 1.08rem;
   font-weight: 600;
   color: var(--text);
   letter-spacing: -0.025em;
+  line-height: 1.35;
+  cursor: default;
+  /* Collapsed default: single line with ellipsis */
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 520px;
-  cursor: default;
-  line-height: 1.3;
+  max-height: 1.6em;
+  transition: max-height 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Hover / focus: reveal the full question in place, no ellipsis */
+.session-topbar-identity:hover .session-topbar-name,
+.session-topbar-name:hover,
+.session-topbar-name:focus-visible {
+  white-space: normal;
+  text-overflow: clip;
+  overflow: visible;
+  max-height: 40em;
+  word-break: break-word;
 }
 
 .session-topbar-rename-btn {
   flex-shrink: 0;
-  width: 26px;
-  height: 26px;
+  width: 24px;
+  height: 24px;
   border: none;
   background: transparent;
   color: var(--muted);
@@ -4217,6 +4348,7 @@ textarea {
   justify-content: center;
   border-radius: 6px;
   opacity: 0;
+  margin-top: 2px;
   transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
 
@@ -4231,6 +4363,8 @@ textarea {
 }
 
 .session-topbar-name-input {
+  flex: 1;
+  min-width: 0;
   font-size: 1.08rem;
   font-weight: 600;
   color: var(--text);
@@ -4238,40 +4372,92 @@ textarea {
   border: 1.5px solid var(--primary);
   border-radius: 7px;
   padding: 3px 10px;
-  min-width: 240px;
-  max-width: 480px;
   outline: none;
   background: var(--surface-strong);
   box-shadow: 0 0 0 3px rgba(15, 106, 184, 0.12);
 }
 
-.session-topbar-right {
-  flex-shrink: 0;
-}
+/* ── Compact identity footer — live status + tokens ── */
 
-/* ── Status + token strip row ── */
-
-.session-status-row {
+.session-topbar-footer {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
-  flex-shrink: 0;
 }
 
-.session-meta-text {
-  margin: 0;
+.session-topbar-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-topbar-status-text {
   font-size: 0.78rem;
   color: var(--muted);
-  line-height: 1.55;
-  flex: 1;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Override token-strip inside session-detail-pane to be inline */
-.session-detail-pane .token-strip {
-  margin-top: 0;
+.session-topbar-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
   flex-shrink: 0;
+  background: var(--muted);
+}
+
+.session-topbar-dot.is-running {
+  background: var(--accent);
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+.session-topbar-dot.is-queued {
+  background: var(--muted);
+  opacity: 0.6;
+}
+
+.session-topbar-dot.is-paused,
+.session-topbar-dot.is-pausing {
+  background: #b46400;
+}
+
+.session-topbar-dot.is-resuming {
+  background: #009650;
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+.session-topbar-dot.is-completed {
+  background: #009650;
+}
+
+.session-topbar-dot.is-failed {
+  background: #c0392b;
+}
+
+.session-topbar-tokens {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 10px;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.session-topbar-tokens-breakdown {
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.session-topbar-tokens-total {
+  color: var(--primary-strong);
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 /* ── Session panels grid ── */
@@ -4296,120 +4482,191 @@ textarea {
   grid-column: span 12;
 }
 
-/* ── Failed session restart button ── */
+/* ── Failed session actions ── */
 
 .failed-session-actions {
-  padding: 10px 14px 12px;
-  border-top: 1px solid rgba(159, 47, 47, 0.1);
+  padding: 4px 16px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.failed-restart-btn {
+.failed-session-actions-primary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.failed-action-btn {
   display: inline-flex;
   align-items: center;
   gap: 7px;
   padding: 8px 16px;
-  border-radius: 9px;
-  background: var(--surface-strong);
-  border: 1.5px solid rgba(159, 47, 47, 0.25);
-  color: #8b2020;
-  font-size: 0.8rem;
+  border-radius: 10px;
+  font-size: 0.80rem;
   font-weight: 600;
+  letter-spacing: -0.005em;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s, box-shadow 0.1s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s, box-shadow 0.15s;
+  border: 1.2px solid transparent;
 }
 
-.failed-restart-btn:hover {
-  background: rgba(192, 57, 43, 0.05);
-  border-color: rgba(159, 47, 47, 0.50);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(159, 47, 47, 0.12);
-}
-
-.failed-restart-btn:active {
+.failed-action-btn:active {
   transform: translateY(0);
 }
 
-.failed-restart-btn:disabled {
+.failed-action-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
 }
 
-.failed-resume-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 14px;
-  border-radius: var(--radius-md);
-  border: 1.2px solid rgba(39, 120, 80, 0.40);
-  background: rgba(39, 120, 80, 0.04);
-  color: #1a6b42;
-  font-size: 0.77rem;
-  font-weight: 500;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+.failed-action-btn--primary {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+  box-shadow: 0 1px 2px rgba(10, 109, 196, 0.22);
 }
 
-.failed-resume-btn:hover {
-  background: rgba(39, 120, 80, 0.08);
-  border-color: rgba(39, 120, 80, 0.55);
+.failed-action-btn--primary:hover {
+  background: var(--primary-strong);
+  border-color: var(--primary-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgba(10, 109, 196, 0.24);
+}
+
+.failed-action-btn--ghost {
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--primary-strong);
+  border-color: rgba(10, 109, 196, 0.28);
+}
+
+.failed-action-btn--ghost:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary);
   transform: translateY(-1px);
 }
 
-.failed-resume-btn:active {
-  transform: translateY(0);
+/* ── Advanced restart options ── */
+
+.failed-session-advanced {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.failed-ideation-btn {
+.failed-advanced-toggle {
+  align-self: flex-start;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  padding: 6px 14px;
-  border-radius: var(--radius-md);
-  border: 1.2px solid rgba(55, 95, 170, 0.38);
-  background: rgba(55, 95, 170, 0.05);
-  color: #244f99;
-  font-size: 0.77rem;
+  gap: 6px;
+  padding: 5px 10px 5px 8px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 0.73rem;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  border-radius: 7px;
+  transition: color 0.12s, background 0.12s;
 }
 
-.failed-ideation-btn:hover {
-  background: rgba(55, 95, 170, 0.09);
-  border-color: rgba(55, 95, 170, 0.52);
+.failed-advanced-toggle:hover {
+  color: var(--text);
+  background: rgba(86, 102, 125, 0.06);
+}
+
+.failed-advanced-toggle svg {
+  flex-shrink: 0;
+  transition: transform 0.18s ease;
+}
+
+.failed-advanced-toggle.is-open svg {
+  transform: rotate(180deg);
+}
+
+.failed-advanced-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.failed-stage-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 9px 12px;
+  border-radius: 9px;
+  border: 1px solid rgba(86, 102, 125, 0.16);
+  background: rgba(255, 255, 255, 0.6);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, transform 0.1s, box-shadow 0.15s;
+}
+
+.failed-stage-option:hover {
+  background: #fff;
+  border-color: rgba(10, 109, 196, 0.28);
   transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(10, 109, 196, 0.08);
 }
 
-.failed-ideation-btn:active {
-  transform: translateY(0);
+.failed-stage-option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--primary-strong);
+}
+
+.failed-stage-option-sub {
+  font-size: 0.71rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.failed-stage-option--expander .failed-stage-option-label svg {
+  transition: transform 0.18s ease;
+}
+
+.failed-stage-option--expander.is-open .failed-stage-option-label svg {
+  transform: rotate(180deg);
 }
 
 .failed-theory-stage-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(86, 102, 125, 0.04);
+  border: 1px dashed rgba(86, 102, 125, 0.18);
 }
 
 .failed-stage-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid rgba(86, 102, 125, 0.22);
-  background: rgba(86, 102, 125, 0.05);
+  padding: 5px 10px;
+  border-radius: 7px;
+  border: 1px solid rgba(86, 102, 125, 0.18);
+  background: rgba(255, 255, 255, 0.7);
   color: #4a5668;
-  font-size: 0.74rem;
+  font-size: 0.73rem;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, transform 0.1s;
+  transition: background 0.12s, border-color 0.12s, color 0.12s, transform 0.1s;
 }
 
 .failed-stage-btn:hover:not(:disabled) {
-  background: rgba(86, 102, 125, 0.10);
-  border-color: rgba(86, 102, 125, 0.38);
+  background: var(--primary-soft);
+  border-color: var(--primary);
+  color: var(--primary-strong);
   transform: translateY(-1px);
 }
 
@@ -4419,15 +4676,17 @@ textarea {
 }
 
 .failed-session-note-badge.retryable {
-  display: inline-block;
-  margin-left: auto;
-  padding: 1px 8px;
+  flex-shrink: 0;
+  padding: 2px 9px;
   border-radius: 10px;
-  background: rgba(230, 160, 50, 0.12);
-  color: #996b1a;
-  font-size: 0.68rem;
+  background: rgba(230, 160, 50, 0.14);
+  color: #916112;
+  font-size: 0.64rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1.6;
+  margin-top: 3px;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -4525,55 +4784,66 @@ textarea {
   height: fit-content;
   max-height: calc(100vh - 160px);
   overflow-y: auto;
-  padding: 12px 8px 16px;
+  padding: 14px 10px 18px;
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 3px;
   border-right: 1px solid var(--line);
-  background: rgba(247, 245, 239, 0.65);
+  background: var(--bg-soft);
   scrollbar-width: thin;
   scrollbar-color: var(--line) transparent;
 }
 
 .agent-step-card {
   display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 11px 12px;
-  border-radius: var(--radius-md);
-  background: var(--surface-strong);
-  border: 1.5px solid var(--line);
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1.5px solid transparent;
   text-align: left;
   width: 100%;
   cursor: pointer;
-  transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
-  min-height: 58px;
+  transition: all 0.2s ease;
 }
 
 .agent-step-card:hover {
-  border-color: var(--primary-soft);
-  box-shadow: 0 2px 10px rgba(15, 106, 184, 0.08);
+  background: var(--surface-strong);
+  border-color: var(--line);
 }
 
 .agent-step-card.is-active {
-  border-color: var(--primary);
-  background: rgba(15, 106, 184, 0.05);
+  background: var(--primary-soft);
+  border-color: transparent;
 }
 
 .agent-step-card.is-done {
-  border-color: var(--ok);
-  background: rgba(84, 119, 101, 0.05);
+  background: transparent;
+  border-color: transparent;
+}
+
+.agent-step-card.is-done:hover {
+  background: rgba(45, 134, 89, 0.04);
+  border-color: var(--line);
 }
 
 .agent-step-card.is-failed {
-  border-color: #c0392b;
-  background: rgba(192, 57, 43, 0.05);
+  background: transparent;
+  border-color: transparent;
+}
+
+.agent-step-card.is-failed:hover {
+  background: rgba(196, 127, 23, 0.04);
+  border-color: var(--line);
 }
 
 .agent-step-icon {
-  font-size: 1.3rem;
+  font-size: 1rem;
   flex-shrink: 0;
   line-height: 1;
+  width: 20px;
+  text-align: center;
 }
 
 .agent-step-body {
@@ -4581,46 +4851,46 @@ textarea {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding-top: 1px;
+  gap: 1px;
 }
 
 .agent-step-name {
   font-weight: 600;
-  font-size: 0.82rem;
+  font-size: 0.78rem;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  letter-spacing: -0.01em;
 }
 
 .agent-step-summary {
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   color: var(--muted);
-  white-space: normal;
+  white-space: nowrap;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  text-overflow: ellipsis;
   line-height: 1.35;
 }
 
+.agent-step-card.is-active .agent-step-summary {
+  color: var(--primary);
+}
+
 .agent-step-badge {
-  font-size: 0.65rem;
-  font-weight: 700;
+  font-size: 0.62rem;
+  font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
   padding: 2px 7px;
   border-radius: 20px;
   flex-shrink: 0;
-  margin-top: 2px;
-  align-self: flex-start;
 }
 
-.badge-active { background: rgba(15, 106, 184, 0.13); color: var(--primary); }
-.badge-done   { background: rgba(84, 119, 101, 0.13); color: var(--ok); }
-.badge-failed { background: rgba(192, 57, 43, 0.13); color: #c0392b; }
-.badge-pending { background: rgba(110, 119, 132, 0.1); color: var(--muted); }
+.badge-active { background: rgba(10, 109, 196, 0.1); color: var(--primary); }
+.badge-done   { background: rgba(45, 134, 89, 0.08); color: var(--ok); }
+.badge-failed { background: rgba(196, 127, 23, 0.1); color: var(--warn); }
+.badge-pending { background: transparent; color: var(--muted); }
 
 /* ── Workspace main column ───────────────────────────────────────────────── */
 
@@ -5037,7 +5307,7 @@ textarea {
 
 .proof-theorem-text {
   margin: 0;
-  font-family: "Fira Code", "JetBrains Mono", monospace;
+  font-family: var(--mono);
   font-size: 0.8rem;
   white-space: pre-wrap;
   word-break: break-word;
@@ -5116,7 +5386,7 @@ textarea {
 .proof-lemma-formal {
   font-size: 0.74rem;
   color: var(--muted);
-  font-family: "Fira Code", monospace;
+  font-family: var(--mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -5479,7 +5749,7 @@ textarea {
 
 .drawer-paper-excerpt {
   font-size: 0.75rem;
-  font-family: "Fira Code", monospace;
+  font-family: var(--mono);
   color: var(--muted);
   white-space: pre-wrap;
   word-break: break-word;
@@ -5841,7 +6111,7 @@ textarea {
   border-radius: 8px;
   padding: 14px 16px;
   font-size: 0.82rem;
-  font-family: "Fira Code", "IBM Plex Mono", monospace;
+  font-family: var(--mono);
   white-space: pre-wrap;
   word-break: break-word;
   margin-bottom: 18px;
@@ -5849,6 +6119,17 @@ textarea {
   overflow-y: auto;
   color: var(--text);
   line-height: 1.5;
+}
+
+.gate-overlay-error {
+  margin: 8px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(192, 57, 43, 0.06);
+  border: 1px solid rgba(192, 57, 43, 0.18);
+  color: #8b2d26;
+  font-size: 0.80rem;
+  line-height: 1.45;
 }
 
 /* ── Theory review: feedback section ── */
@@ -5950,3 +6231,52 @@ textarea {
   color: var(--primary);
   margin-top: 2px;
 }
+
+/* ── Pipeline Timeline (inline in LivePanel) ─────────────────────────── */
+
+.pipeline-timeline {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 16px;
+  background: var(--surface-cool);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+}
+
+.pipeline-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.pipeline-event--failed {
+  color: var(--warn);
+}
+
+.pipeline-event-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+}
+
+.pipeline-event--failed .pipeline-event-dot {
+  background: var(--warn);
+}
+
+.pipeline-event-label {
+  flex: 1;
+}
+
+.pipeline-event-time {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--dim);
+}
+
+/* paper-review.css is imported at the top of this file */

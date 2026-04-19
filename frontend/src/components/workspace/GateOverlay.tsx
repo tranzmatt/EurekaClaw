@@ -10,15 +10,20 @@ interface Props {
 function SurveyGate({ run }: Props) {
   const [paperText, setPaperText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function submit(skip: boolean) {
+    if (submitting) return;
+    setError(null);
     setSubmitting(true);
     try {
       const paper_ids = skip
         ? []
         : paperText.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
       await apiPost(`/api/runs/${run.run_id}/gate/survey`, { paper_ids });
-    } finally {
+      // Keep submitting=true; overlay unmounts when pipeline status moves off awaiting_gate
+    } catch (err) {
+      setError((err as Error).message || 'Could not submit');
       setSubmitting(false);
     }
   }
@@ -37,12 +42,13 @@ function SurveyGate({ run }: Props) {
         rows={4}
         disabled={submitting}
       />
+      {error && <p className="gate-overlay-error" role="alert">{error}</p>}
       <div className="gate-btn-row">
-        <button className="btn btn-primary" disabled={submitting || !paperText.trim()} onClick={() => submit(false)}>
-          Retry with these papers
+        <button className="btn btn-primary" disabled={submitting || !paperText.trim()} onClick={() => void submit(false)}>
+          {submitting ? 'Submitting…' : 'Retry with these papers'}
         </button>
-        <button className="btn btn-secondary" disabled={submitting} onClick={() => submit(true)}>
-          Continue without papers
+        <button className="btn btn-secondary" disabled={submitting} onClick={() => void submit(true)}>
+          {submitting ? 'Submitting…' : 'Continue without papers'}
         </button>
       </div>
     </div>
@@ -56,12 +62,18 @@ function DirectionGate({ run }: Props) {
   const conjecture = run.input_spec?.conjecture || run.input_spec?.query || '';
   const [dirText, setDirText] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function submit(direction: string) {
+    const val = direction.trim();
+    if (!val || submitting) return;
+    setError(null);
     setSubmitting(true);
     try {
-      await apiPost(`/api/runs/${run.run_id}/gate/direction`, { direction });
-    } finally {
+      await apiPost(`/api/runs/${run.run_id}/gate/direction`, { direction: val });
+      // Keep submitting=true; overlay unmounts on status change
+    } catch (err) {
+      setError((err as Error).message || 'Could not submit');
       setSubmitting(false);
     }
   }
@@ -119,23 +131,25 @@ function DirectionGate({ run }: Props) {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
             const val = dirText.trim() || conjecture;
-            if (val) submit(val);
+            if (val) void submit(val);
           }
         }}
       />
 
+      {error && <p className="gate-overlay-error" role="alert">{error}</p>}
+
       <div className="gate-btn-row">
         {conjecture && (
-          <button className="btn btn-primary" disabled={submitting} onClick={() => submit(conjecture)}>
-            Use conjecture
+          <button className="btn btn-primary" disabled={submitting} onClick={() => void submit(conjecture)}>
+            {submitting ? 'Submitting…' : 'Use conjecture'}
           </button>
         )}
         <button
           className={conjecture ? 'btn btn-secondary' : 'btn btn-primary'}
           disabled={submitting || !dirText.trim()}
-          onClick={() => submit(dirText.trim())}
+          onClick={() => void submit(dirText)}
         >
-          Use this direction
+          {submitting ? 'Submitting…' : 'Use this direction'}
         </button>
       </div>
     </div>
@@ -150,28 +164,32 @@ function TheoryReviewGate({ run }: Props) {
   const [selectedLemma, setSelectedLemma] = useState('');
   const [reason, setReason] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function approve() {
+    if (submitting) return;
+    setError(null);
     setSubmitting(true);
     try {
       await apiPost(`/api/runs/${run.run_id}/gate/theory`, { approved: true });
-    } finally {
+    } catch (err) {
+      setError((err as Error).message || 'Could not submit');
       setSubmitting(false);
     }
   }
 
   async function reject() {
+    if (!reason.trim() || submitting) return;
+    setError(null);
     setSubmitting(true);
     try {
       await apiPost(`/api/runs/${run.run_id}/gate/theory`, {
         approved: false,
         lemma_id: selectedLemma,
-        reason,
+        reason: reason.trim(),
       });
-      setRejecting(false);
-      setSelectedLemma('');
-      setReason('');
-    } finally {
+    } catch (err) {
+      setError((err as Error).message || 'Could not submit');
       setSubmitting(false);
     }
   }
@@ -185,10 +203,11 @@ function TheoryReviewGate({ run }: Props) {
       {ts?.formal_statement && (
         <pre className="gate-overlay-theorem">{ts.formal_statement.slice(0, 400)}{ts.formal_statement.length > 400 ? '\n…' : ''}</pre>
       )}
+      {error && <p className="gate-overlay-error" role="alert">{error}</p>}
       {!rejecting ? (
         <div className="gate-btn-row">
-          <button className="btn btn-primary" disabled={submitting} onClick={approve}>
-            Approve &amp; continue
+          <button className="btn btn-primary" disabled={submitting} onClick={() => void approve()}>
+            {submitting ? 'Submitting…' : 'Approve & continue'}
           </button>
           <button className="btn btn-secondary" disabled={submitting} onClick={() => setRejecting(true)}>
             Flag a concern
@@ -232,8 +251,8 @@ function TheoryReviewGate({ run }: Props) {
             disabled={submitting}
           />
           <div className="gate-btn-row">
-            <button className="btn btn-primary" disabled={submitting || !reason.trim()} onClick={reject}>
-              Submit feedback &amp; revise
+            <button className="btn btn-primary" disabled={submitting || !reason.trim()} onClick={() => void reject()}>
+              {submitting ? 'Submitting…' : 'Submit feedback & revise'}
             </button>
             <button className="btn btn-ghost" disabled={submitting} onClick={() => setRejecting(false)}>
               Cancel

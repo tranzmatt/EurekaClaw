@@ -53,6 +53,12 @@ def create_client(
     # (chatgpt.com/backend-api/codex/responses), not the standard OpenAI API.
     # The Chat Completions API rejects them with 429 "insufficient_quota"
     # and the standard Responses API rejects them with 401 "missing scopes".
+    if original_backend == "codex" and settings.codex_auth_mode != "oauth":
+        # Clear OAuth env vars that may linger from a previous oauth
+        # session in the same process. Only clears OPENAI_COMPAT_API_KEY
+        # if it was injected by setup_codex_env (not user-provided).
+        from eurekaclaw.codex_manager import clear_oauth_env
+        clear_oauth_env()
     if original_backend == "codex" and settings.codex_auth_mode == "oauth":
         from eurekaclaw.codex_manager import maybe_setup_codex_auth
         from eurekaclaw.llm.openai_responses import OpenAIResponsesAdapter

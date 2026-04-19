@@ -13,33 +13,30 @@ export function statusClass(status: string): string {
   return 'status-idle';
 }
 
-export function liveStatusDetail(run: SessionRun | null): string {
-  if (!run) return 'Launch a session from the form above.';
-  if (run.status === 'queued') return 'Session queued — waiting to start…';
+// Short meta used in the top-bar identity footer. Keeps the fact
+// count down: status + active outer stage + elapsed (when relevant).
+export function compactRunMeta(run: SessionRun | null, elapsedSeconds: number): string {
+  if (!run) return '';
+  if (run.status === 'queued') return 'Queued — waiting to start…';
   if (run.status === 'running') {
-    const activeTasks = (run.pipeline || []).filter((t) => t.status === 'in_progress');
-    if (activeTasks.length) {
-      return `Running: ${activeTasks.map((t) => titleCase(t.name)).join(', ')}`;
-    }
-    const elapsed = run.started_at
-      ? Math.floor((Date.now() - new Date(run.started_at).getTime()) / 1000)
-      : 0;
-    return `Running${elapsed ? ` · ${elapsed}s elapsed` : ''}`;
+    const stage = getActiveOuterStage(run.pipeline ?? []);
+    const label = stage ? titleCase(stage) : 'Running';
+    return elapsedSeconds > 0 ? `${label} · ${formatElapsed(elapsedSeconds)}` : label;
   }
-  if (run.status === 'completed') {
-    const dir = run.output_dir ? ` → ${run.output_dir}` : '';
-    return `Completed${dir}`;
-  }
-  if (run.status === 'paused') {
-    return 'Proof paused at checkpoint — click Resume to continue, or use the Copy command button.';
-  }
-  if (run.status === 'failed') {
-    if (run.error_category === 'retryable' && run.has_checkpoint) {
-      return `Temporary failure (checkpoint saved) — ${run.error || 'unknown error'}`;
-    }
-    return `Failed: ${run.error || 'unknown error'}`;
-  }
-  return `Run ${run.run_id.slice(0, 8)}`;
+  if (run.status === 'completed') return 'Completed';
+  if (run.status === 'paused') return 'Paused — resume when ready';
+  if (run.status === 'pausing') return 'Stopping safely…';
+  if (run.status === 'resuming') return 'Resuming…';
+  if (run.status === 'failed') return 'Failed';
+  return titleCase(run.status);
+}
+
+function formatElapsed(s: number): string {
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return `${h}h ${m}m`;
 }
 
 export function getActiveOuterStage(pipeline: PipelineTask[]): string | null {

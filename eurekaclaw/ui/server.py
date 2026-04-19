@@ -16,8 +16,13 @@ from functools import partial
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
+
+if TYPE_CHECKING:
+    from eurekaclaw.knowledge_bus.bus import KnowledgeBus
+    from eurekaclaw.types.artifacts import ResearchBrief
+    from eurekaclaw.types.tasks import TaskPipeline
 
 import subprocess as _subprocess
 import sys as _sys
@@ -26,9 +31,18 @@ from eurekaclaw.ccproxy_manager import maybe_start_ccproxy, stop_ccproxy, is_ccp
 from eurekaclaw.config import settings
 from eurekaclaw.console import close_ui_html_sink, register_ui_html_sink
 from eurekaclaw.llm import create_client
-from eurekaclaw.main import EurekaSession, save_artifacts, save_console_html_artifact, _compile_pdf
+from eurekaclaw.main import (
+    EurekaSession,
+    save_artifacts,
+    save_console_html_artifact,
+    _compile_pdf,
+    _copy_template_assets,
+)
 from eurekaclaw.skills.registry import SkillRegistry
 from eurekaclaw.types.tasks import InputSpec, ResearchOutput, TaskStatus
+from eurekaclaw.orchestrator.meta_orchestrator import MetaOrchestrator
+from eurekaclaw.orchestrator.paper_qa_handler import PaperQAHandler
+from eurekaclaw.ui.constants import REWRITE_MARKER_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -542,8 +556,22 @@ class UIServerState:
         *,
         start_stage: str,
         theory_substage: str | None = None,
+        override_brief: Any | None = None,
+        override_bibliography: Any | None = None,
+        force_empty_bibliography: bool = False,
+        force_no_theory_state: bool = False,
     ) -> dict[str, Any]:
-        """Re-execute a run from a later stage using saved survey artifacts."""
+        """Re-execute a run from a later stage using saved survey artifacts.
+
+        ``override_brief`` / ``override_bibliography`` skip artifact loading
+        from disk and bus, forcing the restart to use the supplied values.
+        ``force_empty_bibliography`` drops any loaded bibliography so
+        downstream stages see an empty paper set (used when the user opted
+        to continue without papers after a stale survey gate).
+        ``force_no_theory_state`` discards any persisted theory state so an
+        earlier aborted theory attempt cannot leak into this restart (used
+        whenever we resume at a stage before theory).
+        """
         run = self.get_run(run_id)
         if run is None:
             return {"error": "Run not found"}
@@ -552,20 +580,30 @@ class UIServerState:
         if theory_substage is not None and theory_substage not in _THEORY_SUBSTAGES:
             return {"error": f"Unknown theory substage: {theory_substage}"}
 
-        brief = None
-        bibliography = None
+        brief = override_brief
+        bibliography = override_bibliography
         theory_state = None
-        if run.eureka_session is not None and run.eureka_session.bus is not None:
-            brief = run.eureka_session.bus.get_research_brief()
-            bibliography = run.eureka_session.bus.get_bibliography()
-            theory_state = run.eureka_session.bus.get_theory_state()
+        if brief is None or (bibliography is None and not force_empty_bibliography):
+            if run.eureka_session is not None and run.eureka_session.bus is not None:
+                if brief is None:
+                    brief = run.eureka_session.bus.get_research_brief()
+                if bibliography is None and not force_empty_bibliography:
+                    bibliography = run.eureka_session.bus.get_bibliography()
+                if not force_no_theory_state:
+                    theory_state = run.eureka_session.bus.get_theory_state()
 
-        if brief is None or bibliography is None:
+        if brief is None or (bibliography is None and not force_empty_bibliography):
             saved_brief, saved_bib = _load_saved_run_artifacts(run)
             brief = brief or saved_brief
-            bibliography = bibliography or saved_bib
-        if theory_state is None:
+            if not force_empty_bibliography:
+                bibliography = bibliography or saved_bib
+        if theory_state is None and not force_no_theory_state:
             theory_state = _load_saved_theory_state(run)
+
+        if force_empty_bibliography:
+            bibliography = None
+        if force_no_theory_state:
+            theory_state = None
 
         if brief is None:
             return {"error": "No saved survey artifacts found — rerun the full session instead"}
@@ -614,6 +652,68 @@ class UIServerState:
     def restart_from_ideation(self, run_id: str) -> dict[str, Any]:
         """Re-execute a run starting from ideation, reusing saved survey artifacts."""
         return self._restart_from_stage(run_id, start_stage="ideation")
+
+    def skip_survey_to_ideation(self, run_id: str) -> dict[str, Any]:
+        """Skip the survey stage and continue to ideation.
+
+        Called from the survey gate endpoint when the gate is no longer live
+        (the orchestrator thread is gone after a server restart or crash) and
+        the user clicked "Continue without papers". Always builds a fresh
+        research brief from the run's input_spec and forces an empty
+        bibliography — any artifacts lingering from prior reruns of this run
+        are discarded so ideation starts from a clean slate.
+        """
+        from eurekaclaw.types.artifacts import ResearchBrief
+
+        run = self.get_run(run_id)
+        if run is None:
+            return {"error": "Run not found"}
+
+        # The gate was reported stale by submit_survey → treat any lingering
+        # "running"/"queued" status as an interrupted run so restart proceeds.
+        if run.status in ("running", "queued", "pausing", "resuming"):
+            run.status = "failed"
+            run.error = run.error or "Session interrupted before ideation."
+            run.error_category = run.error_category or "retryable"
+            run.updated_at = datetime.utcnow()
+            self._persist_run(run)
+
+        # Purge any stale bibliography / theory state persisted from a prior
+        # attempt so ideation starts from a clean slate (matches the user's
+        # "Continue without papers" intent and prevents an earlier theory
+        # attempt from bleeding into this fresh restart).
+        if run.output_dir:
+            out_dir = Path(run.output_dir)
+            for stale_name in ("bibliography.json", "theory_state.json"):
+                try:
+                    out_dir.joinpath(stale_name).unlink(missing_ok=True)
+                except Exception:
+                    logger.warning(
+                        "Failed to clear stale %s in %s",
+                        stale_name,
+                        run.output_dir,
+                        exc_info=True,
+                    )
+
+        spec = run.input_spec
+        fresh_brief = ResearchBrief(
+            session_id=run.eureka_session_id or run.run_id,
+            input_mode=spec.mode,
+            domain=spec.domain,
+            query=spec.query or spec.conjecture or spec.domain,
+            conjecture=spec.conjecture,
+            selected_skills=spec.selected_skills,
+            reference_paper_ids=spec.paper_ids,
+        )
+
+        return self._restart_from_stage(
+            run_id,
+            start_stage="ideation",
+            override_brief=fresh_brief,
+            override_bibliography=None,
+            force_empty_bibliography=True,
+            force_no_theory_state=True,
+        )
 
     def restart_from_theory(self, run_id: str) -> dict[str, Any]:
         """Re-execute a run starting from theory, reusing saved ideation artifacts."""
@@ -910,6 +1010,7 @@ class UIServerState:
             _rg.register_survey(session.session_id)
             _rg.register_direction(session.session_id)
             _rg.register_theory(session.session_id)
+            _rg.register_paper_qa(session.session_id)
 
             with _temporary_auth_env(config):
                 # asyncio.run() can be unreliable in non-main threads on some
@@ -1029,6 +1130,7 @@ class UIServerState:
             _rg.register_survey(session.session_id)
             _rg.register_direction(session.session_id)
             _rg.register_theory(session.session_id)
+            _rg.register_paper_qa(session.session_id)
 
             with _temporary_auth_env(config):
                 loop = asyncio.new_event_loop()
@@ -1079,6 +1181,22 @@ class UIServerState:
     def snapshot_run(self, run: SessionRun) -> dict[str, Any]:
         bus = run.eureka_session.bus if run.eureka_session else None
         pipeline = bus.get_pipeline() if bus else None
+        # When bus is None (e.g. server restarted after session completed),
+        # load the pipeline from the persisted pipeline.json on disk.
+        if pipeline is None and run.eureka_session_id:
+            from eurekaclaw.types.tasks import TaskPipeline as _TP
+            for _search_dir in [
+                Path(run.output_dir) if run.output_dir else None,
+                settings.runs_dir / run.eureka_session_id,
+            ]:
+                if _search_dir and (_search_dir / "pipeline.json").is_file():
+                    try:
+                        pipeline = _TP.model_validate_json(
+                            (_search_dir / "pipeline.json").read_text(encoding="utf-8")
+                        )
+                        break
+                    except Exception:
+                        pass
         tasks: list[dict[str, Any]] = []
         if pipeline:
             for task in pipeline.tasks:
@@ -1107,6 +1225,7 @@ class UIServerState:
             theory_state = _load_saved_theory_state(run)
         experiment_result = bus.get_experiment_result() if bus else None
         resource_analysis = bus.get("resource_analysis") if bus else None
+        paper_qa_answer = bus.get("paper_qa_answer") if bus else None
 
         # Check if a checkpoint exists for this session (enables "resume" in UI)
         has_checkpoint = False
@@ -1137,12 +1256,401 @@ class UIServerState:
                 "theory_state": _serialize_value(theory_state) if theory_state else None,
                 "experiment_result": _serialize_value(experiment_result) if experiment_result else None,
                 "resource_analysis": _serialize_value(resource_analysis) if resource_analysis else None,
+                "paper_qa_answer": paper_qa_answer if paper_qa_answer else None,
             },
             "result": _serialize_value(run.result) if run.result else None,
             "output_summary": _serialize_value(run.output_summary),
             "output_dir": run.output_dir,
             "theory_feedback": run.theory_feedback,
         }
+
+
+def _bump_writer_paper_version(bus: "KnowledgeBus") -> int:
+    """Increment writer.outputs['paper_version'] on the bus pipeline.
+
+    Treats a missing field as version 1 (the frontend shows v1 for
+    first writer output). Returns the new version. No-op (returns 0) if
+    no writer task is found.
+    """
+    pipeline = bus.get_pipeline()
+    if not pipeline:
+        return 0
+    writer_task = next(
+        (t for t in pipeline.tasks if t.name == "writer"), None
+    )
+    if writer_task is None:
+        return 0
+    outputs = writer_task.outputs or {}
+    new_version = int(outputs.get("paper_version", 1)) + 1
+    outputs["paper_version"] = new_version
+    writer_task.outputs = outputs
+    bus.put_pipeline(pipeline)
+    return new_version
+
+
+def _sync_latex_to_disk(run) -> tuple[bool, str]:
+    """Sync writer bus latex → <run.output_dir>/paper.tex.
+
+    Returns (changed, latex). Writes paper.tex only if bus latex differs
+    from the on-disk copy. An empty `latex_paper` is treated as "nothing
+    to sync" — the on-disk copy is not overwritten. Never touches
+    paper.pdf; callers that care about stale PDFs are responsible for
+    unlinking them.
+    """
+    if not getattr(run, "output_dir", None):
+        return False, ""
+    session = getattr(run, "eureka_session", None)
+    bus = getattr(session, "bus", None) if session else None
+    if bus is None:
+        return False, ""
+    pipeline = bus.get_pipeline()
+    if not pipeline:
+        return False, ""
+    writer = next((t for t in pipeline.tasks if t.name == "writer"), None)
+    if writer is None or not writer.outputs:
+        return False, ""
+    latex = writer.outputs.get("latex_paper", "")
+    if not latex:
+        return False, ""
+    tex_path = Path(run.output_dir) / "paper.tex"
+    tex_path.parent.mkdir(parents=True, exist_ok=True)
+    old = tex_path.read_text(encoding="utf-8") if tex_path.is_file() else ""
+    if latex != old:
+        tex_path.write_text(latex, encoding="utf-8")
+        return True, latex
+    return False, latex
+
+
+def _ensure_bus_activated(run) -> tuple["KnowledgeBus", "TaskPipeline", "ResearchBrief"]:
+    """Return the run's live bus/pipeline/brief, hydrating from disk if needed.
+
+    Raises ValueError / FileNotFoundError on corrupt or missing state.
+    Callers typically map those to HTTP 400.
+    """
+    session = getattr(run, "eureka_session", None)
+    bus = getattr(session, "bus", None) if session else None
+    if bus is None:
+        from eurekaclaw.orchestrator.session_loader import SessionLoader
+        bus, _brief, _pipeline = SessionLoader.load(run.eureka_session_id)
+        from eurekaclaw.main import EurekaSession
+        if session is None:
+            run.eureka_session = EurekaSession.__new__(EurekaSession)
+            run.eureka_session.session_id = run.eureka_session_id
+        run.eureka_session.bus = bus
+    pipeline = bus.get_pipeline()
+    brief = bus.get_research_brief()
+    if pipeline is None or brief is None:
+        raise ValueError("Session pipeline or brief missing from bus")
+    return bus, pipeline, brief
+
+
+def _unlink_stale_pdf(run) -> None:
+    """Delete paper.pdf from session_dir and output_dir if present.
+
+    Matches the cleanup _review/rewrite_ was doing inline; called after a
+    successful rewrite so the frontend's PDF iframe re-fetches the freshly
+    compiled file instead of the stale one.
+    """
+    candidates = []
+    session_id = getattr(run, "eureka_session_id", None)
+    if session_id:
+        candidates.append(settings.runs_dir / session_id / "paper.pdf")
+    if getattr(run, "output_dir", None):
+        candidates.append(Path(run.output_dir) / "paper.pdf")
+    for pdf_path in candidates:
+        try:
+            if pdf_path.is_file():
+                pdf_path.unlink()
+        except OSError:
+            logger.warning("Could not unlink stale PDF at %s", pdf_path, exc_info=True)
+
+
+def _mark_rewrite_tasks_failed(pipeline, bus) -> None:
+    """Flip theory/experiment/writer to FAILED if they were left mid-rewrite.
+
+    Called from the background-rewrite exception handler so the pipeline
+    settles in a visible terminal state — the frontend polls pipeline and
+    can otherwise see a phantom "in progress" forever.
+
+    Catches both IN_PROGRESS (task was actively running) and PENDING (task
+    was marked pending by the handler's pre-spawn flip but the bg thread
+    died before the agent executor ran, e.g. create_client crash).
+    """
+    mid_rewrite = (TaskStatus.IN_PROGRESS, TaskStatus.PENDING)
+    changed = False
+    for name in ("theory", "experiment", "writer"):
+        task = next((t for t in pipeline.tasks if t.name == name), None)
+        if task is not None and task.status in mid_rewrite:
+            task.status = TaskStatus.FAILED
+            changed = True
+    if changed:
+        bus.put_pipeline(pipeline)
+
+
+def _mark_rewrite_tasks_pending(pipeline, bus) -> None:
+    """Flip theory/experiment/writer to PENDING before the bg thread starts.
+
+    Called from the /rewrite handler synchronously before thread.start() so
+    the client's next pipeline poll immediately sees pipelineRewriting=True.
+    Without this, the 202 response drops the frontend's local isRewriting
+    flag in a window where pipelineRewriting is still false — a fast
+    double-click slips through to a second POST, and an early bg crash
+    (orchestrator construction, etc) is invisible because the UI never
+    refetches /paper-qa/history (mode stays 'completed').
+    """
+    changed = False
+    for name in ("theory", "experiment", "writer"):
+        task = next((t for t in pipeline.tasks if t.name == name), None)
+        if task is not None and task.status != TaskStatus.PENDING:
+            task.status = TaskStatus.PENDING
+            changed = True
+    if changed:
+        bus.put_pipeline(pipeline)
+
+
+_REWRITE_CLAIM_LOCK = threading.Lock()
+_REWRITE_CLAIM_SESSIONS: set[str] = set()
+
+# Non-task bus artifacts written by theory/experiment/writer agents during
+# a rewrite. Snapshot before _do_rewrite and restore on failure so a failed
+# rewrite doesn't leak stale analysis into the next attempt. Task outputs
+# (theory/experiment/writer.outputs) are already restored by _do_rewrite
+# itself; this list covers everything OUTSIDE the pipeline tasks.
+#
+# If you add an agent that writes new bus keys during theory/experiment/
+# writer, add the key here so the rollback covers it.
+_REWRITE_MUTABLE_BUS_KEYS: tuple[str, ...] = (
+    "resource_analysis",
+    "numerically_suspect_lemmas",
+    "revision_feedback",
+)
+
+
+_REWRITE_ARTIFACT_UNSET = object()
+
+
+def _snapshot_rewrite_bus_artifacts(bus) -> dict[str, Any]:
+    """Snapshot bus artifacts that rewrite agents may mutate.
+
+    Returns a dict mapping key → prior value, or _REWRITE_ARTIFACT_UNSET
+    for keys that weren't set. Pair with _restore_rewrite_bus_artifacts.
+    """
+    return {
+        key: bus.get(key, _REWRITE_ARTIFACT_UNSET)
+        for key in _REWRITE_MUTABLE_BUS_KEYS
+    }
+
+
+def _restore_rewrite_bus_artifacts(bus, snapshot: dict[str, Any]) -> None:
+    """Restore bus artifacts from a snapshot taken before _do_rewrite.
+
+    For keys with a prior value: put the prior value back.
+    For keys that were unset before: remove them from the bus store so
+    a failed rewrite's newly-created artifact doesn't linger into the
+    next attempt. KnowledgeBus has no public delete, so we reach into
+    ._store.pop — bus is a thin dict wrapper.
+    """
+    for key, prior in snapshot.items():
+        if prior is _REWRITE_ARTIFACT_UNSET:
+            bus._store.pop(key, None)
+            continue
+        bus.put(key, prior)
+
+
+def _claim_rewrite_slot(session_id: str) -> bool:
+    """Claim a per-session rewrite slot. Returns True iff claim succeeded.
+
+    The /rewrite handler's status-based guard is not atomic with thread
+    spawn — two requests can both see all-COMPLETED tasks in the window
+    before _do_rewrite flips anything to IN_PROGRESS. This lock closes
+    that window: a second /rewrite for the same session is refused until
+    the first bg thread releases its slot.
+    """
+    if not session_id:
+        return False
+    with _REWRITE_CLAIM_LOCK:
+        if session_id in _REWRITE_CLAIM_SESSIONS:
+            return False
+        _REWRITE_CLAIM_SESSIONS.add(session_id)
+        return True
+
+
+def _release_rewrite_slot(session_id: str) -> None:
+    """Release a claim made by _claim_rewrite_slot. No-op if not held."""
+    if not session_id:
+        return
+    with _REWRITE_CLAIM_LOCK:
+        _REWRITE_CLAIM_SESSIONS.discard(session_id)
+
+
+def _stale_paper_qa_response(action: str) -> tuple[dict[str, Any], HTTPStatus]:
+    """Response body + status for a /gate/paper_qa submit on a stale gate.
+
+    For action='no' (Accept), the stale-gate cleanup closes the stranded
+    UI state — which IS what the user asked for. Returning {ok:true} is
+    honest.
+
+    For action='rewrite' (or any other non-'no' action), the cleanup
+    only de-strands the UI; it does NOT honor the rewrite. Returning
+    {ok:true} would silently drop the user's intent. Return 409 so the
+    client knows to retry via /rewrite.
+    """
+    if action == "no":
+        return {"ok": True, "stale_gate_cleaned": True}, HTTPStatus.OK
+    return (
+        {
+            "error": "Gate no longer active; use /rewrite for rewrite actions.",
+            "stale_gate_cleaned": True,
+        },
+        HTTPStatus.CONFLICT,
+    )
+
+
+def _handle_stale_paper_qa_gate(pipeline, bus, session_id: str) -> None:
+    """Flip a stale AWAITING_GATE paper_qa_gate task to FAILED and persist.
+
+    Called from /rewrite and /gate/paper_qa when submit_paper_qa returns
+    False. Only flips the task when its current status is AWAITING_GATE —
+    otherwise the helper is a no-op. The guard matters because a duplicate
+    Accept click after the orchestrator finishes (paper_qa_gate=COMPLETED,
+    gate entry unregistered) also produces submit_paper_qa=False, and we
+    must not corrupt a legitimately completed gate into FAILED.
+    """
+    qa = next((t for t in pipeline.tasks if t.name == "paper_qa_gate"), None)
+    if qa is None or qa.status != TaskStatus.AWAITING_GATE:
+        return
+    qa.status = TaskStatus.FAILED
+    bus.put_pipeline(pipeline)
+    try:
+        bus.persist(settings.runs_dir / session_id)
+    except Exception:
+        logger.exception(
+            "Could not persist pipeline after stale gate for %s",
+            session_id,
+        )
+
+
+def _append_paper_qa_rewrite_marker_file(session_id: str, prompt: str) -> None:
+    """Module-level counterpart to the HTTP handler's rewrite-marker method.
+
+    Needed because _run_rewrite_bg is module-level (runs on a background
+    thread with no handler instance). The on-disk format and constants
+    match _append_paper_qa_rewrite_marker exactly.
+    """
+    if not session_id or not prompt:
+        return
+    from datetime import datetime as _dt, timezone as _tz
+    history_dir = settings.runs_dir / session_id
+    try:
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_file = history_dir / "paper_qa_history.jsonl"
+        entry = {
+            "role": "system",
+            "content": f'{REWRITE_MARKER_PREFIX}"{prompt}"',
+            "ts": _dt.now(_tz.utc).isoformat(),
+        }
+        with history_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        logger.warning("Could not append rewrite marker for %s", session_id, exc_info=True)
+
+
+def _append_paper_qa_error_marker(session_id: str, msg: str) -> None:
+    """Append a 'Revision error: <msg>' system line for the rewrite history."""
+    if not session_id or not msg:
+        return
+    from datetime import datetime as _dt, timezone as _tz
+    history_dir = settings.runs_dir / session_id
+    try:
+        history_dir.mkdir(parents=True, exist_ok=True)
+        history_file = history_dir / "paper_qa_history.jsonl"
+        entry = {
+            "role": "system",
+            "content": f"Revision error: {msg}",
+            "ts": _dt.now(_tz.utc).isoformat(),
+        }
+        with history_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError:
+        logger.warning("Could not append error marker for %s", session_id, exc_info=True)
+
+
+def _run_rewrite_bg(run, bus, pipeline, brief, prompt: str, rewrite_id: str) -> None:
+    """Thread entry point. Owns its own asyncio event loop.
+
+    On success: mutates pipeline in-place (theory → experiment → writer
+    re-run) through handler._do_rewrite, then syncs paper.tex to disk,
+    unlinks stale paper.pdf, bumps paper_version, appends rewrite marker,
+    persists bus.
+
+    On failure: catches everything, flips any IN_PROGRESS rewrite tasks
+    to FAILED so the frontend's pipeline poll settles, and appends an
+    error marker.
+    """
+    session_id = run.eureka_session_id
+    # Snapshot non-task bus artifacts BEFORE any agent runs. If the rewrite
+    # fails (soft failure OR exception), restore them so the next rewrite
+    # doesn't inherit stale analysis from the failed attempt. _do_rewrite
+    # already restores task outputs internally; this covers what it doesn't.
+    artifact_snapshot = _snapshot_rewrite_bus_artifacts(bus)
+    try:
+        orchestrator = MetaOrchestrator(bus=bus, client=create_client())
+        handler = PaperQAHandler(
+            bus=bus,
+            agents=orchestrator.agents,
+            router=orchestrator.router,
+            client=orchestrator.client,
+            tool_registry=orchestrator.tool_registry,
+            skill_injector=orchestrator.skill_injector,
+            memory=orchestrator.memory,
+            gate_controller=orchestrator.gate,
+        )
+        new_latex = asyncio.run(
+            handler._do_rewrite(pipeline, brief, revision_prompt=prompt)
+        )
+        if new_latex:
+            _sync_latex_to_disk(run)
+            _unlink_stale_pdf(run)
+            _bump_writer_paper_version(bus)
+            _append_paper_qa_rewrite_marker_file(session_id, prompt)
+            bus.persist(settings.runs_dir / session_id)
+        else:
+            # Soft failure: restore bus artifacts, then surface as error.
+            _restore_rewrite_bus_artifacts(bus, artifact_snapshot)
+            _append_paper_qa_error_marker(session_id, "Rewrite produced no new paper")
+    except Exception as e:
+        logger.exception("Rewrite background task %s failed: %s", rewrite_id, e)
+        _restore_rewrite_bus_artifacts(bus, artifact_snapshot)
+        _mark_rewrite_tasks_failed(pipeline, bus)
+        try:
+            bus.persist(settings.runs_dir / session_id)
+        except Exception:
+            logger.exception(
+                "Could not persist bus after rewrite failure for %s", session_id
+            )
+        _append_paper_qa_error_marker(session_id, f"Rewrite failed: {e}")
+    finally:
+        _release_rewrite_slot(session_id)
+
+
+def _extract_latex_error(log_path: Path, max_chars: int = 1200) -> str:
+    """Pull the relevant pdflatex error excerpt out of paper.log.
+
+    pdflatex logs are noisy; the useful bit is the block starting at the
+    first line that begins with '!'. We return that block (plus a few
+    lines of context) trimmed to max_chars so the UI can show it.
+    """
+    try:
+        text = log_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    lines = text.splitlines()
+    first_err = next((i for i, ln in enumerate(lines) if ln.startswith("!")), None)
+    if first_err is None:
+        return "\n".join(lines[-30:])[-max_chars:]
+    start = max(0, first_err - 2)
+    end = min(len(lines), first_err + 20)
+    return "\n".join(lines[start:end])[-max_chars:]
 
 
 def _install_lean4() -> dict[str, Any]:
@@ -1464,10 +1972,49 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             # Security: only allow known artifact filenames
             _allowed = {"paper.tex", "paper.pdf", "paper.md", "references.bib",
                         "theory_state.json", "experiment_result.json", "research_brief.json"}
-            if _art_filename not in _allowed or not _art_path.is_file():
+            if _art_filename not in _allowed:
                 self._send_json({"error": "File not found"}, status=HTTPStatus.NOT_FOUND)
                 return
-            self._send_file(_art_path)
+            # Sync the latest paper.tex from memory so .tex downloads
+            # reflect any edits made since save_artifacts last ran.
+            # Never touch paper.pdf here — compile-pdf owns the PDF
+            # lifecycle.
+            if _art_filename == "paper.tex":
+                _sync_latex_to_disk(_art_run)
+            if not _art_path.is_file():
+                self._send_json({"error": "File not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            # Serve PDF inline so iframes can display it
+            inline = _art_filename.endswith(".pdf")
+            self._send_file(_art_path, as_attachment=not inline)
+            return
+
+        # GET /api/runs/<run_id>/paper-qa/history
+        parts_pqa = parsed.path.strip("/").split("/")
+        if (len(parts_pqa) == 5 and parts_pqa[0] == "api" and parts_pqa[1] == "runs"
+                and parts_pqa[3] == "paper-qa" and parts_pqa[4] == "history"):
+            run_id = parts_pqa[2]
+            run = self.state.get_run(run_id)
+            if run is None:
+                self._send_json({"error": "Run not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            session_id = run.eureka_session_id
+            if not session_id:
+                # No session id yet — return empty rather than reading
+                # settings.runs_dir / "" which would mix history across runs.
+                self._send_json({"messages": []})
+                return
+            import json as _json
+            history_file = settings.runs_dir / session_id / "paper_qa_history.jsonl"
+            messages = []
+            if history_file.exists():
+                for line in history_file.read_text(encoding="utf-8").strip().split("\n"):
+                    if line.strip():
+                        try:
+                            messages.append(_json.loads(line))
+                        except _json.JSONDecodeError:
+                            pass
+            self._send_json({"messages": messages})
             return
 
         if parsed.path.startswith("/api/runs/"):
@@ -1674,16 +2221,37 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 self._send_json({"error": "No output directory"}, status=HTTPStatus.BAD_REQUEST)
                 return
             tex_path = Path(run.output_dir) / "paper.tex"
+            # Always sync the latest LaTeX from the writer task's
+            # in-memory output to disk. At gate time paper.tex may not
+            # exist yet, and after a rewrite the on-disk copy is stale.
+            changed, _ = _sync_latex_to_disk(run)
+            if changed:
+                # Remove stale PDF so it gets freshly compiled.
+                stale_pdf = Path(run.output_dir) / "paper.pdf"
+                if stale_pdf.is_file():
+                    stale_pdf.unlink()
             if not tex_path.is_file():
                 self._send_json({"error": "No paper.tex found"}, status=HTTPStatus.BAD_REQUEST)
                 return
+            # Ensure eureka.cls, smile.sty, logo-claw.png, fonts/ sit next to
+            # paper.tex. save_artifacts() only runs at full pipeline
+            # completion, so during the Paper QA gate or a rewrite the
+            # template assets may not have been copied yet.
+            try:
+                _copy_template_assets(Path(run.output_dir))
+            except Exception:
+                logger.warning("Could not copy template assets to %s", run.output_dir, exc_info=True)
             try:
                 _compile_pdf(tex_path, settings.latex_bin)
                 pdf_path = Path(run.output_dir) / "paper.pdf"
                 if pdf_path.is_file():
                     self._send_json({"ok": True, "pdf_path": str(pdf_path)})
                 else:
-                    self._send_json({"error": "pdflatex ran but produced no PDF — check paper.log"}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                    log_tail = _extract_latex_error(Path(run.output_dir) / "paper.log")
+                    msg = "pdflatex ran but produced no PDF"
+                    if log_tail:
+                        msg = f"{msg}:\n{log_tail}"
+                    self._send_json({"error": msg}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
             except FileNotFoundError:
                 self._send_json({"error": "pdflatex binary not found. Install TeX (e.g. brew install --cask basictex)"}, status=HTTPStatus.BAD_REQUEST)
             except Exception as exc:
@@ -1801,6 +2369,185 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
             self._send_json(result, status=status)
             return
 
+        # POST /api/runs/<run_id>/rewrite — unified rewrite entry point
+        parts_rw = parsed.path.strip("/").split("/")
+        if (len(parts_rw) == 4 and parts_rw[0] == "api" and parts_rw[1] == "runs"
+                and parts_rw[3] == "rewrite"):
+            run_id = parts_rw[2]
+            run = self.state.get_run(run_id)
+            if run is None:
+                self._send_json({"error": "Run not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+
+            try:
+                bus, pipeline, brief = _ensure_bus_activated(run)
+            except (ValueError, FileNotFoundError) as e:
+                self._send_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            payload = self._read_json()
+            prompt = str(payload.get("revision_prompt", "")).strip()
+            if not prompt:
+                self._send_json(
+                    {"error": "revision_prompt required"},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
+                return
+
+            # Concurrency guard — refuse if a rewrite is already in flight.
+            # Scope mirrors _mark_rewrite_tasks_failed and _do_rewrite's replay
+            # set: theory → experiment → writer. Missing experiment here would
+            # let a second request slip through while the experiment task was
+            # IN_PROGRESS.
+            rewrite_task_names = ("theory", "experiment", "writer")
+            rewrite_tasks = [
+                next((t for t in pipeline.tasks if t.name == name), None)
+                for name in rewrite_task_names
+            ]
+            if any(t is not None and t.status == TaskStatus.IN_PROGRESS
+                   for t in rewrite_tasks):
+                self._send_json(
+                    {"error": "A rewrite is already in progress"},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+
+            # Gate-live path: live orchestrator is still waiting on paper_qa_gate.
+            # submit_paper_qa returns False when the in-memory gate entry is
+            # missing (orchestrator died, server restart) — in that case we
+            # clean up the stale AWAITING_GATE on disk and fall through to the
+            # bg path so the user's rewrite intent still gets honored.
+            paper_qa_task = next(
+                (t for t in pipeline.tasks if t.name == "paper_qa_gate"), None
+            )
+            if paper_qa_task is not None and paper_qa_task.status == TaskStatus.AWAITING_GATE:
+                from eurekaclaw.ui import review_gate
+                from eurekaclaw.ui.review_gate import PaperQADecision
+                submitted = review_gate.submit_paper_qa(
+                    run.eureka_session_id,
+                    PaperQADecision(action="rewrite", question=prompt),
+                )
+                if submitted:
+                    self._send_json(
+                        {"ok": True, "mode": "gate"},
+                        status=HTTPStatus.ACCEPTED,
+                    )
+                    return
+                _handle_stale_paper_qa_gate(pipeline, bus, run.eureka_session_id)
+
+            # Background path: orchestrator is idle/completed. Spawn a thread.
+            # Claim the per-session slot BEFORE starting the thread so a
+            # racing second request can't slip past the status-based guard
+            # in the window before _do_rewrite flips tasks to IN_PROGRESS.
+            if not _claim_rewrite_slot(run.eureka_session_id):
+                self._send_json(
+                    {"error": "A rewrite is already in progress"},
+                    status=HTTPStatus.CONFLICT,
+                )
+                return
+            # Flip rewrite tasks to PENDING synchronously so the client's
+            # next pipeline poll sees pipelineRewriting=True before the 202
+            # lands — closes the "invisible early failure" and
+            # "double-click slips a second POST" gaps.
+            _mark_rewrite_tasks_pending(pipeline, bus)
+            rewrite_id = str(uuid.uuid4())
+            thread = threading.Thread(
+                target=_run_rewrite_bg,
+                args=(run, bus, pipeline, brief, prompt, rewrite_id),
+                daemon=True,
+            )
+            try:
+                thread.start()
+            except Exception:
+                # Release the slot AND restore task statuses if we failed to
+                # start the thread at all — otherwise the session is
+                # permanently blocked with phantom PENDING tasks.
+                _mark_rewrite_tasks_failed(pipeline, bus)
+                _release_rewrite_slot(run.eureka_session_id)
+                raise
+            self._send_json(
+                {"ok": True, "mode": "bg", "rewrite_id": rewrite_id},
+                status=HTTPStatus.ACCEPTED,
+            )
+            return
+
+        # ── Paper QA endpoints ────────────────────────────────────────────
+        parts_pqa = parsed.path.strip("/").split("/")
+        if (len(parts_pqa) == 5 and parts_pqa[0] == "api" and parts_pqa[1] == "runs"
+                and parts_pqa[3] == "paper-qa" and parts_pqa[4] == "ask"):
+            run_id = parts_pqa[2]
+            run = self.state.get_run(run_id)
+            if run is None:
+                self._send_json({"error": "Run not found"}, status=HTTPStatus.NOT_FOUND)
+                return
+            session_id = run.eureka_session_id
+            if not session_id:
+                self._send_json({"error": "No active session"}, status=HTTPStatus.BAD_REQUEST)
+                return
+            payload = self._read_json()
+            question = str(payload.get("question", "")).strip()
+            history_list = payload.get("history", [])
+            if not question:
+                self._send_json({"error": "No question provided"}, status=HTTPStatus.BAD_REQUEST)
+                return
+
+            try:
+                bus, _pipeline, _brief = _ensure_bus_activated(run)
+            except (ValueError, FileNotFoundError) as e:
+                self._send_json({"error": str(e)}, status=HTTPStatus.BAD_REQUEST)
+                return
+            latex = bus.get("paper_qa_latex") or ""
+
+            import asyncio as _asyncio
+            from eurekaclaw.agents.paper_qa.agent import PaperQAAgent
+            from eurekaclaw.tools.registry import build_default_registry
+            from eurekaclaw.skills.injector import SkillInjector
+            from eurekaclaw.skills.registry import SkillRegistry
+            from eurekaclaw.memory.manager import MemoryManager
+            from eurekaclaw.llm import create_client
+
+            tool_registry = build_default_registry(bus=bus)
+            agent = PaperQAAgent(
+                bus=bus,
+                tool_registry=tool_registry,
+                skill_injector=SkillInjector(SkillRegistry()),
+                memory=MemoryManager(session_id=session_id),
+                client=create_client(),
+            )
+            clean_history = [
+                {"role": h.get("role", "user"), "content": h.get("content", "")}
+                for h in history_list
+            ]
+            loop = _asyncio.new_event_loop()
+            try:
+                result = loop.run_until_complete(
+                    agent.ask(question=question, latex=latex, history=clean_history)
+                )
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+            finally:
+                loop.close()
+            if result.failed:
+                self._send_json({"error": result.error}, status=HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
+
+            import json as _json
+            from datetime import datetime as _dt, timezone as _tz
+            history_dir = settings.runs_dir / session_id
+            history_dir.mkdir(parents=True, exist_ok=True)
+            history_file = history_dir / "paper_qa_history.jsonl"
+            ts = _dt.now(_tz.utc).isoformat()
+            with history_file.open("a", encoding="utf-8") as f:
+                f.write(_json.dumps({"role": "user", "content": question, "ts": ts}, ensure_ascii=False) + "\n")
+                f.write(_json.dumps({"role": "assistant", "content": result.output.get("answer", ""), "ts": ts}, ensure_ascii=False) + "\n")
+
+            self._send_json({
+                "answer": result.output.get("answer", ""),
+                "tool_steps": [],
+            })
+            return
+
         # Gate submission endpoints: /api/runs/<run_id>/gate/{survey|direction|theory}
         parts = parsed.path.strip("/").split("/")
         if len(parts) == 4 and parts[0] == "api" and parts[1] == "runs" and parts[3] == "gate":
@@ -1823,6 +2570,21 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 raw_ids = payload.get("paper_ids", [])
                 paper_ids = [str(x).strip() for x in raw_ids if str(x).strip()]
                 ok = _rg.submit_survey(session_id, paper_ids)
+                if not ok:
+                    # Stale gate (server restart / orchestrator already gone).
+                    # "Continue without papers" → skip survey, restart from ideation.
+                    if not paper_ids:
+                        recovery = self.state.skip_survey_to_ideation(run_id)
+                        if "error" in recovery:
+                            self._send_json(recovery, status=HTTPStatus.BAD_REQUEST)
+                        else:
+                            self._send_json({"ok": True, "skipped": "survey"})
+                        return
+                    self._send_json(
+                        {"error": "Gate no longer active — restart the session to retry with these papers."},
+                        status=HTTPStatus.BAD_REQUEST,
+                    )
+                    return
             elif gate_type == "direction":
                 direction = str(payload.get("direction", "")).strip()
                 ok = _rg.submit_direction(session_id, direction)
@@ -1832,13 +2594,44 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
                 lemma_id = str(payload.get("lemma_id", "")).strip()
                 reason = str(payload.get("reason", "")).strip()
                 ok = _rg.submit_theory(session_id, TheoryDecision(approved=approved, lemma_id=lemma_id, reason=reason))
+            elif gate_type == "paper_qa":
+                from eurekaclaw.ui.review_gate import PaperQADecision
+                action = str(payload.get("action", "no")).strip()
+                question = str(payload.get("question", "")).strip()
+                ok = _rg.submit_paper_qa(session_id, PaperQADecision(action=action, question=question))
+                # We intentionally do NOT write a rewrite marker here —
+                # submit only queues the decision. PaperQAHandler persists
+                # the "↻ Rewrite requested" entry itself, but only after
+                # the rewrite actually produces a new paper version.
+                if not ok:
+                    # Stale gate: disk shows AWAITING_GATE but the in-memory
+                    # entry is gone (orchestrator died, server restart).
+                    # Without cleanup the pipeline stays AWAITING_GATE forever
+                    # and every click hits the same 400, stranding the user.
+                    # Flip the task to FAILED + persist so the pipeline poll
+                    # resolves the UI. For Accept that's the whole story; for
+                    # rewrite the action was NOT honored (see
+                    # _stale_paper_qa_response) and the client must retry via
+                    # /rewrite.
+                    try:
+                        bus, pipeline, _brief = _ensure_bus_activated(run)
+                        _handle_stale_paper_qa_gate(pipeline, bus, session_id)
+                        body, status = _stale_paper_qa_response(action)
+                        self._send_json(body, status=status)
+                        return
+                    except (ValueError, FileNotFoundError):
+                        # Fall through to the generic error below.
+                        pass
             else:
                 self._send_json({"error": f"Unknown gate type: {gate_type}"}, status=HTTPStatus.BAD_REQUEST)
                 return
             if ok:
                 self._send_json({"ok": True})
             else:
-                self._send_json({"error": "Gate not active for this session"}, status=HTTPStatus.BAD_REQUEST)
+                self._send_json(
+                    {"error": "Gate no longer active — this session was interrupted. Restart to continue."},
+                    status=HTTPStatus.BAD_REQUEST,
+                )
             return
 
         self._send_json({"error": "Not found"}, status=HTTPStatus.NOT_FOUND)
@@ -1878,6 +2671,27 @@ class UIRequestHandler(SimpleHTTPRequestHandler):
         if not body:
             return {}
         return json.loads(body.decode("utf-8"))
+
+    def _append_paper_qa_rewrite_marker(self, session_id: str, prompt: str) -> None:
+        """Persist a "↻ Rewrite requested" line to paper_qa_history.jsonl so
+        the marker survives page reloads (frontend-only optimistic state
+        would otherwise disappear on refresh)."""
+        if not session_id or not prompt:
+            return
+        from datetime import datetime as _dt, timezone as _tz
+        history_dir = settings.runs_dir / session_id
+        try:
+            history_dir.mkdir(parents=True, exist_ok=True)
+            history_file = history_dir / "paper_qa_history.jsonl"
+            entry = {
+                "role": "system",
+                "content": f'{REWRITE_MARKER_PREFIX}"{prompt}"',
+                "ts": _dt.now(_tz.utc).isoformat(),
+            }
+            with history_file.open("a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        except OSError:
+            logger.warning("Could not append rewrite marker for %s", session_id, exc_info=True)
 
     def _send_json(self, payload: dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
         data = json.dumps(payload).encode("utf-8")
