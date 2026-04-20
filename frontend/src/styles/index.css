@@ -348,14 +348,6 @@ img {
   -webkit-box-orient: vertical;
   line-height: 1.4;
   max-height: 2.8em;
-  transition: max-height 0.28s cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.session-item:hover .session-item-name,
-.session-item:hover .session-item-prompt {
-  -webkit-line-clamp: unset;
-  max-height: 40em;
-  word-break: break-word;
 }
 
 /* Session item actions group (rename + restart + delete) */
@@ -1088,6 +1080,23 @@ img {
   overflow-x: hidden;
 }
 
+/* A mounted session detail pane has its own internal scroll containers
+   (ws-panel for Live/Proof, .qa-messages for Paper Q&A, .pv-content for
+   the LaTeX view). Without a hard viewport cap on main-shell, a tall
+   Q&A message or long LaTeX source pushes the whole app down the page
+   because body/app-shell/main-shell all only use min-height: 100vh.
+   Scope the cap to the `main-shell--session` modifier, which App.tsx
+   attaches only when the workspace view is showing SessionDetailPane.
+   This preserves page-scroll for the launch form (NewSessionForm) and
+   for onboarding/skills/config, while still capping the chain when
+   internal scroll containers are actually mounted. (Explicit modifier
+   instead of `:has()` to stay within the repo's browser baseline.) */
+.main-shell--session {
+  height: 100vh;
+  min-height: 100vh;
+  overflow: hidden;
+}
+
 .conn-error-banner {
   display: flex;
   align-items: center;
@@ -1113,6 +1122,7 @@ img {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 /* ── Tutorial / Guide button — bottom-right of main content area ── */
@@ -4770,6 +4780,7 @@ textarea {
 .workspace-split {
   display: grid;
   grid-template-columns: 250px 1fr;
+  grid-template-rows: minmax(0, 1fr);
   gap: 0;
   flex: 1;
   min-height: 0;
@@ -4946,6 +4957,17 @@ textarea {
 .ws-panel.is-visible {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+/* Paper tab manages its own internal scrolling (PDF viewer on the left,
+   .qa-messages on the right). Without this override the ws-panel itself
+   becomes the scroll container, so growing the chat past the viewport
+   scrolls the whole tab — hiding qa-messages's inner scrollbar and
+   letting the split layout drift off-screen. */
+#ws-panel-paper.ws-panel {
+  overflow: hidden;
+  padding: 0;
 }
 
 /* ── Live activity area ──────────────────────────────────────────────────── */

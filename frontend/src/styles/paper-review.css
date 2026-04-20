@@ -2,7 +2,7 @@
 
 .paper-review-panel {
   display: flex;
-  height: 100%;
+  flex: 1;
   min-height: 0;
   background: var(--bg);
   gap: 1px;
@@ -114,9 +114,45 @@
 
 .pv-content {
   flex: 1;
-  overflow-y: auto;
+  /* Default: the PDF iframe owns its own scrollbar, so the outer
+     container must not add a second (dead) track. */
+  overflow: hidden;
   min-height: 0;
   background: var(--surface-strong);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong, var(--line)) transparent;
+}
+
+/* LaTeX variant: the raw source is just a <pre>, so .pv-content has to
+   be the scroll container. Force `scroll` (not `auto`) so the track is
+   visible even when the source happens to fit — matches the persistent
+   affordance the user asked for on the Q&A side. The modifier class is
+   toggled by PaperViewer based on activeTab (explicit class, not :has(),
+   to stay within the repo's browser baseline). */
+.pv-content--latex {
+  overflow-y: scroll;
+  overflow-x: hidden;
+}
+
+.pv-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.pv-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pv-content::-webkit-scrollbar-thumb {
+  background: var(--line-strong, var(--line));
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.pv-content::-webkit-scrollbar-thumb:hover {
+  background: var(--muted, var(--line-strong));
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
 .pv-pdf-frame {
@@ -215,6 +251,7 @@
   flex-direction: column;
   background: var(--surface-strong);
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   flex: 1;
   width: 100%;
@@ -258,11 +295,38 @@
 .qa-messages {
   flex: 1;
   padding: 20px;
-  overflow-y: auto;
+  /* `scroll` (not `auto`) keeps the track visible even at zero messages
+     so the affordance is discoverable — user explicitly wants each
+     sub-panel to expose a scrollbar. */
+  overflow-y: scroll;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   gap: 16px;
   min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong, var(--line)) transparent;
+}
+
+.qa-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+.qa-messages::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.qa-messages::-webkit-scrollbar-thumb {
+  background: var(--line-strong, var(--line));
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.qa-messages::-webkit-scrollbar-thumb:hover {
+  background: var(--muted, var(--line-strong));
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
 .qa-empty-state {
@@ -308,6 +372,7 @@
   padding: 10px 16px;
   border-radius: 18px 18px 4px 18px;
   max-width: 80%;
+  word-break: break-word;
   font-size: 0.82rem;
   line-height: 1.55;
   box-shadow: 0 1px 3px rgba(10, 109, 196, 0.15);
@@ -319,6 +384,7 @@
   padding: 12px 16px;
   border-radius: 18px 18px 18px 4px;
   max-width: 85%;
+  word-break: break-word;
   font-size: 0.82rem;
   line-height: 1.6;
   color: var(--text);
