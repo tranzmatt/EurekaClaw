@@ -115,8 +115,32 @@
 .pv-content {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
   background: var(--surface-strong);
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong, var(--line)) transparent;
+}
+
+.pv-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.pv-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.pv-content::-webkit-scrollbar-thumb {
+  background: var(--line-strong, var(--line));
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.pv-content::-webkit-scrollbar-thumb:hover {
+  background: var(--muted, var(--line-strong));
+  background-clip: padding-box;
+  border: 2px solid transparent;
 }
 
 .pv-pdf-frame {
