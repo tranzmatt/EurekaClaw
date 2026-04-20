@@ -4941,6 +4941,16 @@ textarea {
   min-height: 0;
 }
 
+/* Paper tab manages its own internal scrolling (PDF viewer on the left,
+   .qa-messages on the right). Without this override the ws-panel itself
+   becomes the scroll container, so growing the chat past the viewport
+   scrolls the whole tab — hiding qa-messages's inner scrollbar and
+   letting the split layout drift off-screen. */
+#ws-panel-paper.ws-panel {
+  overflow: hidden;
+  padding: 0;
+}
+
 /* ── Live activity area ──────────────────────────────────────────────────── */
 
 .live-activity-area {
